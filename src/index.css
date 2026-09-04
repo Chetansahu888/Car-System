@@ -34,13 +34,15 @@ body {
 /* ─── Sidebar (Clean White with Emerald Active Pill) ─────────────────────────── */
 .sidebar {
   width: var(--sidebar-width);
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   background: #ffffff;
   border-right: 1px solid #e2f0e7;
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   position: fixed;
   top: 0;
+  bottom: 0;
   left: 0;
   z-index: 50;
   display: flex;
@@ -60,13 +62,39 @@ body {
   align-items: center;
   gap: 12px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .sidebar-nav {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 16px 12px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 4px;
+}
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  border-top: 1px solid #f1f5f9;
+  background: #fafcfb;
 }
 
 .nav-section-label {

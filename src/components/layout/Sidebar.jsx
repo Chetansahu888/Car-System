@@ -216,7 +216,7 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
 
         {/* Footer */}
         {!collapsed && (
-          <div style={{ padding: '12px 16px', borderTop: '1px solid #f1f5f9', marginTop: 'auto', background: '#fafcfb' }}>
+          <div className="sidebar-footer">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{
                 width: 8,
