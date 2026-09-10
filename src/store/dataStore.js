@@ -44,6 +44,8 @@ const save = (key, data) => {
 // ─── MAPPER FOR "Purchase Car Details" SHEET ──────────────────────────────────
 export const mapCarToSheet = (car) => ({
   "Timestamp": car.timestamp || car.createdAt || createTimestamp(),
+  "Vehicle ID": car.vehicleId || '',
+  "Firm Name": car.firmName || '',
   "NAME OF CAR / Vehicle": car.carName || '',
   "DATE OF PURCHASE": car.dateOfPurchase || '',
   "MODEL NO": car.modelNo || '',
@@ -69,42 +71,59 @@ export const mapCarToSheet = (car) => ({
   "Agent Name": car.agentName || '',
   "Date Of Insurance": car.dateOfInsurance || '',
   "Pollution Date": car.pollutionDate || '',
-  "Vehicle ID": car.vehicleId || '',
 });
 
 export const mapSheetRowToCar = (row, index) => {
-  const regNo = row['REGISTRATION NO.'] || row['REGISTRATION NO'] || row.registrationNo || '';
-  const carName = row['NAME OF CAR / Vehicle'] || row['Name of Car / Vehicle'] || row.carName || '';
+  if (!row || typeof row !== 'object') return null;
+
+  const get = (...keys) => {
+    for (const k of keys) {
+      if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+        return String(row[k]).trim();
+      }
+      const target = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const [rk, rv] of Object.entries(row)) {
+        if (rk.toLowerCase().replace(/[^a-z0-9]/g, '') === target && rv !== undefined && rv !== null && String(rv).trim() !== '') {
+          return String(rv).trim();
+        }
+      }
+    }
+    return '';
+  };
+
+  const regNo = get('REGISTRATION NO.', 'REGISTRATION NO', 'registrationNo');
+  const carName = get('NAME OF CAR / Vehicle', 'Name of Car / Vehicle', 'carName', 'Car Name');
   if (!regNo && !carName) return null;
 
   return {
-    vehicleId: row['Vehicle ID'] || row.vehicleId || `CAR-${String(index + 1).padStart(4, '0')}`,
+    vehicleId: get('Vehicle ID', 'vehicleId') || `CAR-${String(index + 1).padStart(4, '0')}`,
+    firmName: get('Firm Name', 'Firm name', 'firmName', 'FirmName', 'Firm', 'FIRM NAME'),
     carName: carName,
-    dateOfPurchase: row['DATE OF PURCHASE'] || row.dateOfPurchase || '',
-    modelNo: row['MODEL NO'] || row.modelNo || '',
-    companyPurchasedFrom: row['COMPANY PURCHASED FROM'] || row.companyPurchasedFrom || '',
-    fuelType: row['FUEL TYPE'] || row.fuelType || '',
+    dateOfPurchase: get('DATE OF PURCHASE', 'Date of Purchase', 'dateOfPurchase'),
+    modelNo: get('MODEL NO', 'Model No', 'modelNo'),
+    companyPurchasedFrom: get('COMPANY PURCHASED FROM', 'Company Purchased From', 'companyPurchasedFrom'),
+    fuelType: get('FUEL TYPE', 'Fuel Type', 'fuelType'),
     registrationNo: regNo,
-    chassisNo: row['CHASSIS NO.'] || row['CHASSIS NO'] || row.chassisNo || '',
-    engineNo: row['ENGINE NO.'] || row['ENGINE NO'] || row.engineNo || '',
-    hypothecationBank: row['HYPOTHICATION BANK'] || row.hypothecationBank || '',
-    lastEmiDate: row['LAST EMI DATE'] || row.lastEmiDate || '',
-    dateOfReleaseHypothecation: row['DATE OF RELEASE OF HYPOTHICATION'] || row.dateOfReleaseHypothecation || '',
-    valueOfCar: row['VALUE OF CAR'] || row.valueOfCar || '',
-    emiAmount: row['EMI AMOUNT'] || row.emiAmount || '',
-    insuranceAmount: row['INSURANCE AMOUNT'] || row.insuranceAmount || '',
-    rtoAmount: row['RTO AMOUNT'] || row.rtoAmount || '',
-    companyMobileNo: row['COMPANY MOBILE NO.'] || row['COMPANY MOBILE NO'] || row.companyMobileNo || '',
-    servicePersonName: row['SERVICE PERSON NAME'] || row.servicePersonName || '',
-    servicePersonMobileNo: row['SERVICE PERSON MOBILE NO'] || row.servicePersonMobileNo || '',
-    copyOfInsurance: row['Copy Of Insurance'] || row.copyOfInsurance || '',
-    copyOfRegistration: row['Copy Of Registration'] || row.copyOfRegistration || '',
-    nameOfCompany: row['Name Of The Company'] || row.nameOfCompany || '',
-    nameOfOwner: row['Name Of The Owner'] || row.nameOfOwner || '',
-    agentName: row['Agent Name'] || row.agentName || '',
-    dateOfInsurance: row['Date Of Insurance'] || row.dateOfInsurance || '',
-    pollutionDate: row['Pollution Date'] || row.pollutionDate || '',
-    timestamp: row['Timestamp'] || row.timestamp || '',
+    chassisNo: get('CHASSIS NO.', 'CHASSIS NO', 'Chassis No', 'chassisNo'),
+    engineNo: get('ENGINE NO.', 'ENGINE NO', 'Engine No', 'engineNo'),
+    hypothecationBank: get('HYPOTHICATION BANK', 'Hypothecation Bank', 'hypothecationBank'),
+    lastEmiDate: get('LAST EMI DATE', 'Last EMI Date', 'lastEmiDate'),
+    dateOfReleaseHypothecation: get('DATE OF RELEASE OF HYPOTHICATION', 'Date of Release of Hypothecation', 'dateOfReleaseHypothecation'),
+    valueOfCar: get('VALUE OF CAR', 'Value of Car', 'valueOfCar'),
+    emiAmount: get('EMI AMOUNT', 'EMI Amount', 'emiAmount'),
+    insuranceAmount: get('INSURANCE AMOUNT', 'Insurance Amount', 'insuranceAmount'),
+    rtoAmount: get('RTO AMOUNT', 'RTO Amount', 'rtoAmount'),
+    companyMobileNo: get('COMPANY MOBILE NO.', 'COMPANY MOBILE NO', 'Company Mobile No', 'companyMobileNo'),
+    servicePersonName: get('SERVICE PERSON NAME', 'Service Person Name', 'servicePersonName'),
+    servicePersonMobileNo: get('SERVICE PERSON MOBILE NO', 'Service Person Mobile No', 'servicePersonMobileNo'),
+    copyOfInsurance: get('Copy Of Insurance', 'Copy of Insurance', 'copyOfInsurance'),
+    copyOfRegistration: get('Copy Of Registration', 'Copy of Registration', 'copyOfRegistration'),
+    nameOfCompany: get('Name Of The Company', 'Name of the Company', 'nameOfCompany'),
+    nameOfOwner: get('Name Of The Owner', 'Name of the Owner', 'nameOfOwner'),
+    agentName: get('Agent Name', 'agentName'),
+    dateOfInsurance: get('Date Of Insurance', 'Date of Insurance', 'dateOfInsurance'),
+    pollutionDate: get('Pollution Date', 'pollutionDate'),
+    timestamp: get('Timestamp', 'timestamp') || createTimestamp(),
   };
 };
 
@@ -511,13 +530,17 @@ export const syncAllFromSheets = async (silent = false) => {
       let changed = false;
 
       // 1. Purchase Car Details
-      const purchaseCars = remoteData['purchase car details'] || remoteData['Purchase Car Details'] || remoteData.cars;
+      const purchaseCarsKey = Object.keys(remoteData).find(k => {
+        const norm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return norm === 'purchasecardetails' || norm === 'purchasecar' || norm === 'cars' || norm.includes('purchasecar');
+      });
+      const purchaseCars = purchaseCarsKey ? remoteData[purchaseCarsKey] : (remoteData['purchase car details'] || remoteData['Purchase Car Details'] || remoteData.cars);
       if (Array.isArray(purchaseCars) && purchaseCars.length > 0) {
         const validMappedCars = purchaseCars.map(mapSheetRowToCar).filter(Boolean);
         if (validMappedCars.length > 0) {
           const current = load(KEYS.CARS);
-          const currentKey = current.map(c => `${c.vehicleId}-${c.carName}-${c.registrationNo}`).join('|');
-          const newKey = validMappedCars.map(c => `${c.vehicleId}-${c.carName}-${c.registrationNo}`).join('|');
+          const currentKey = current.map(c => `${c.vehicleId}-${c.carName}-${c.registrationNo}-${c.firmName || ''}`).join('|');
+          const newKey = validMappedCars.map(c => `${c.vehicleId}-${c.carName}-${c.registrationNo}-${c.firmName || ''}`).join('|');
           if (currentKey !== newKey) {
             localStorage.setItem(KEYS.CARS, JSON.stringify(validMappedCars));
             changed = true;
@@ -923,6 +946,31 @@ export const getMasterRepairTypes = async () => {
     console.warn('Could not fetch Master repair types from sheet, using defaults:', err);
   }
   return DEFAULT_TYPES;
+};
+
+export const getMasterFirmNames = async () => {
+  const DEFAULT_FIRMS = [
+    'Passary Minerals Ltd',
+    'Passary Progressive Pvt Ltd',
+    'Passary Refractories Ltd'
+  ];
+
+  try {
+    const remote = await fetchFromSheet('get_Master', 'Master');
+    if (Array.isArray(remote) && remote.length > 0) {
+      const firms = remote
+        .map(r => r['Firm Name'] || r['Firm name'] || r['firmName'] || r['FirmName'] || r['Firm'] || r['FIRM NAME'])
+        .filter(Boolean)
+        .map(t => String(t).trim())
+        .filter(t => t.length > 0 && t !== '.' && t.toLowerCase() !== 'firm name');
+      if (firms.length > 0) {
+        return [...new Set(firms)];
+      }
+    }
+  } catch (err) {
+    console.warn('Could not fetch Master firm names from sheet, using defaults:', err);
+  }
+  return DEFAULT_FIRMS;
 };
 
 export const getVendorOffers = async () => {

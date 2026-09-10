@@ -17,6 +17,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import EmptyState from '../components/ui/EmptyState';
+import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 
 const GOOGLE_PAYMENT_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScn8tHEUldlOM_8DKpHUfHHiRImDVjkpkhhfduaZUIxpxlJrA/viewform';
 
@@ -215,8 +216,8 @@ const Payment = () => {
 
         <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
           {initialLoading && currentList.length === 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48, gap: 12 }}>
-              <span className="spinner" /> <span style={{ color: '#64748b', fontWeight: 600 }}>Loading payments...</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+              <SpeedingCarLoader size="medium" />
             </div>
           ) : pagedList.length === 0 ? (
             <EmptyState

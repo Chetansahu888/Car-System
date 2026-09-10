@@ -16,7 +16,11 @@ const Layout = ({ children }) => {
         setMobileOpen={setMobileOpen}
       />
       <div className={`layout-main ${collapsed ? 'sidebar-collapsed' : ''}`}>
-        <Header onMenuToggle={() => setMobileOpen(true)} />
+        <Header
+          onMenuToggle={() => setMobileOpen(true)}
+          collapsed={collapsed}
+          onToggleSidebar={() => setCollapsed(!collapsed)}
+        />
         <main className="page-content">
           {children}
         </main>

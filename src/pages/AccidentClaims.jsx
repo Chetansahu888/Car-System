@@ -16,6 +16,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import Pagination from '../components/ui/Pagination';
 import EmptyState from '../components/ui/EmptyState';
 import FileUpload from '../components/ui/FileUpload';
+import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 import { openDocument } from '../utils/fileUtils';
 
 const EMPTY_CLAIM = {
@@ -31,7 +32,15 @@ const EMPTY_CLAIM = {
 
 const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepairNo }) => {
   const isEdit = !!claim;
-  const [form, setForm] = useState(isEdit ? { ...claim } : { ...EMPTY_CLAIM, repairNo: preselectedRepairNo || '' });
+  const getInitialVehicleId = () => {
+    if (claim?.vehicleId) return claim.vehicleId;
+    if (claim?.repairNo) {
+      const r = repairs.find(x => x.repairNo === claim.repairNo);
+      return r?.vehicleId || '';
+    }
+    return '';
+  };
+  const [form, setForm] = useState(isEdit ? { ...claim, vehicleId: getInitialVehicleId() } : { ...EMPTY_CLAIM, repairNo: preselectedRepairNo || '' });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
 
@@ -89,10 +98,14 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
             onChange={e => handleRepairSelect(e.target.value)} disabled={isEdit}>
             <option value="">Select repair</option>
             {repairs.filter(r => r.insuranceToBeClaimed === 'Yes').map(r => (
-              <option key={r.repairNo} value={r.repairNo}>{r.repairNo} — {r.carName}</option>
+              <option key={r.repairNo} value={r.repairNo}>{r.repairNo} — {r.carName} {r.vehicleId ? `(${r.vehicleId})` : ''}</option>
             ))}
           </select>
           {errors.repairNo && <span className="form-error">{errors.repairNo}</span>}
+        </div>
+        <div className="form-group">
+          <label className="form-label">Vehicle ID</label>
+          <input className="form-input" value={form.vehicleId || ''} readOnly style={{ opacity: 0.8, background: '#f8fafc', fontFamily: 'monospace', fontWeight: 600 }} placeholder="Auto-populated from Repair" />
         </div>
         <div className="form-group">
           <label className="form-label">Vehicle Name</label>
@@ -326,7 +339,8 @@ const AccidentClaims = () => {
 
   const filtered = claims.filter(c => {
     const q = search.toLowerCase();
-    const match = !q || c.claimNo?.toLowerCase().includes(q) || c.repairNo?.toLowerCase().includes(q) || c.vehicleName?.toLowerCase().includes(q);
+    const vehId = (c.vehicleId || repairs.find(r => r.repairNo === c.repairNo)?.vehicleId || '').toLowerCase();
+    const match = !q || c.claimNo?.toLowerCase().includes(q) || c.repairNo?.toLowerCase().includes(q) || c.vehicleName?.toLowerCase().includes(q) || vehId.includes(q);
     const st = !statusFilter || c.claimStatus === statusFilter;
     return match && st;
   });
@@ -387,8 +401,8 @@ const AccidentClaims = () => {
 
         <div style={{ overflowX: 'auto' }}>
           {loading ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48, gap: 12 }}>
-              <span className="spinner" /> <span style={{ color: '#64748b', fontWeight: 600 }}>Loading claims...</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+              <SpeedingCarLoader size="medium" />
             </div>
           ) : paged.length === 0 ? (
             <EmptyState icon={AlertTriangle} title="No claims found"
@@ -401,6 +415,7 @@ const AccidentClaims = () => {
                 <tr>
                   <th>Claim No.</th>
                   <th>Repair No.</th>
+                  <th>Vehicle ID</th>
                   <th>Vehicle</th>
                   <th>Date of Accident</th>
                   <th>Insurance Co.</th>
@@ -411,29 +426,37 @@ const AccidentClaims = () => {
                 </tr>
               </thead>
               <tbody>
-                {paged.map(claim => (
-                  <tr key={claim.claimNo}>
-                    <td><span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#ea580c' }}>{claim.claimNo}</span></td>
-                    <td><span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#059669' }}>{claim.repairNo}</span></td>
-                    <td><div style={{ fontWeight: 700, color: '#0f172a' }}>{claim.vehicleName}</div></td>
-                    <td>{formatDate(claim.dateOfAccident)}</td>
-                    <td>{claim.insuranceCompany || '—'}</td>
-                    <td>{claim.estimatedClaimAmount ? `₹${Number(claim.estimatedClaimAmount).toLocaleString('en-IN')}` : '—'}</td>
-                    <td><Badge label={claim.surveyStatus} variant={claim.surveyStatus === 'Completed' ? 'success' : 'warning'} /></td>
-                    <td><Badge label={claim.claimStatus} /></td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                        <button className="btn btn-ghost btn-xs" title="View" onClick={() => { setSelected(claim); setModal('view'); }}><Eye size={15} /></button>
-                        {canEdit && (
-                          <>
-                            <button className="btn btn-ghost btn-xs" title="Edit" onClick={() => { setSelected(claim); setModal('edit'); }}><Edit2 size={15} /></button>
-                            <button className="btn btn-ghost btn-xs" title="Delete" style={{ color: '#ef4444' }} onClick={() => setDeleteDialog(claim)}><Trash2 size={15} /></button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {paged.map(claim => {
+                  const vehicleId = claim.vehicleId || repairs.find(r => r.repairNo === claim.repairNo)?.vehicleId || '';
+                  return (
+                    <tr key={claim.claimNo}>
+                      <td><span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#ea580c' }}>{claim.claimNo}</span></td>
+                      <td><span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#059669' }}>{claim.repairNo}</span></td>
+                      <td>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0f172a', background: '#f1f5f9', padding: '3px 8px', borderRadius: 6, fontSize: 12 }}>
+                          {vehicleId || '—'}
+                        </span>
+                      </td>
+                      <td><div style={{ fontWeight: 700, color: '#0f172a' }}>{claim.vehicleName}</div></td>
+                      <td>{formatDate(claim.dateOfAccident)}</td>
+                      <td>{claim.insuranceCompany || '—'}</td>
+                      <td>{claim.estimatedClaimAmount ? `₹${Number(claim.estimatedClaimAmount).toLocaleString('en-IN')}` : '—'}</td>
+                      <td><Badge label={claim.surveyStatus} variant={claim.surveyStatus === 'Completed' ? 'success' : 'warning'} /></td>
+                      <td><Badge label={claim.claimStatus} /></td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                          <button className="btn btn-ghost btn-xs" title="View" onClick={() => { setSelected(claim); setModal('view'); }}><Eye size={15} /></button>
+                          {canEdit && (
+                            <>
+                              <button className="btn btn-ghost btn-xs" title="Edit" onClick={() => { setSelected(claim); setModal('edit'); }}><Edit2 size={15} /></button>
+                              <button className="btn btn-ghost btn-xs" title="Delete" style={{ color: '#ef4444' }} onClick={() => setDeleteDialog(claim)}><Trash2 size={15} /></button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -459,6 +482,7 @@ const AccidentClaims = () => {
               <div className="detail-grid">
                 {[
                   ['Claim No.', selected.claimNo], ['Repair No.', selected.repairNo],
+                  ['Vehicle ID', selected.vehicleId || repairs.find(r => r.repairNo === selected.repairNo)?.vehicleId],
                   ['Vehicle', selected.vehicleName], ['Registration', selected.registrationNo],
                   ['Date of Accident', formatDate(selected.dateOfAccident)], ['Time', selected.timeOfAccident],
                   ['Location', selected.accidentLocation], ['Driver', selected.driverName],

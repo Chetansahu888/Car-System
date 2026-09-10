@@ -13,6 +13,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import EmptyState from '../components/ui/EmptyState';
+import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 
 const EMPTY_FORM = {
   vehicleId: '', date: '', carName: '', nameOfCompany: '',
@@ -518,8 +519,8 @@ const Insurance = () => {
 
         <div style={{ overflowX: 'auto' }}>
           {loading ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px', gap: 12 }}>
-              <span className="spinner" /> <span style={{ color: '#64748b', fontWeight: 600 }}>Loading insurance records...</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+              <SpeedingCarLoader size="medium" />
             </div>
           ) : paged.length === 0 ? (
             <EmptyState icon={Shield} title="No vehicles found" message="Adjust search filters to view vehicles." />

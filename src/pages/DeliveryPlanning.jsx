@@ -12,6 +12,7 @@ import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import EmptyState from '../components/ui/EmptyState';
 import FileUpload from '../components/ui/FileUpload';
+import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 
 const DeliveryPlanningForm = ({ repair, onClose, onSaved }) => {
   const [form, setForm] = useState({
@@ -189,8 +190,8 @@ const DeliveryPlanning = () => {
 
         <div style={{ overflowX: 'auto' }}>
           {loading ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48, gap: 12 }}>
-              <span className="spinner" /> <span style={{ color: '#64748b', fontWeight: 600 }}>Loading records...</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+              <SpeedingCarLoader size="medium" />
             </div>
           ) : paged.length === 0 ? (
             <EmptyState icon={Truck} title="No approved repairs"

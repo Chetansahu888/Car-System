@@ -26,25 +26,15 @@ const NAV_GROUPS = [
     section: 'Insurance',
     items: [
       { to: '/insurance', label: 'Insurance', icon: Shield, pageKey: PAGE_KEYS.INSURANCE },
+      { to: '/accident-claims', label: 'Accident / Claims', icon: AlertTriangle, badgeKey: 'claims', pageKey: PAGE_KEYS.ACCIDENT_CLAIMS },
     ],
   },
   {
     section: 'Repair Management',
     items: [
       { to: '/car-repair', label: 'Car Repair', icon: Wrench, badgeKey: 'repairs', pageKey: PAGE_KEYS.CAR_REPAIR },
-      { to: '/accident-claims', label: 'Accident / Claims', icon: AlertTriangle, badgeKey: 'claims', pageKey: PAGE_KEYS.ACCIDENT_CLAIMS },
       { to: '/vendor-offers', label: 'Vendor Offers', icon: Store, badgeKey: 'offers', pageKey: PAGE_KEYS.VENDOR_OFFERS },
-    ],
-  },
-  {
-    section: 'Approval',
-    items: [
       { to: '/approvals', label: 'Approvals', icon: CheckCircle, badgeKey: 'approvals', pageKey: PAGE_KEYS.APPROVALS },
-    ],
-  },
-  {
-    section: 'Delivery',
-    items: [
       { to: '/delivery', label: 'Delivery Of Car', icon: Truck, badgeKey: 'deliveries', pageKey: PAGE_KEYS.DELIVERY },
     ],
   },
@@ -97,40 +87,82 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
 
       <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
         {/* Logo */}
-        <div className="sidebar-logo">
-          <div style={{
-            width: 38, height: 38, borderRadius: 10,
-            background: '#ffffff', border: '1.5px solid #e2f0e7',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0, boxShadow: '0 3px 8px rgba(5, 150, 105, 0.12)',
-            overflow: 'hidden', padding: 4
-          }}>
-            <img src="/passary-logo.png" alt="Passary Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        {/* Logo & Header */}
+        <div
+          className="sidebar-logo"
+          style={{
+            cursor: collapsed ? 'pointer' : 'default',
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            padding: collapsed ? '12px 10px 8px' : '16px 18px',
+            flexDirection: 'column',
+            gap: 8
+          }}
+          onClick={collapsed ? () => setCollapsed(false) : undefined}
+          title={collapsed ? "Click to expand sidebar" : undefined}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 12, justifyContent: collapsed ? 'center' : 'flex-start' }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: 10,
+              background: '#ffffff', border: '1.5px solid #e2f0e7',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, boxShadow: '0 3px 8px rgba(5, 150, 105, 0.12)',
+              overflow: 'hidden', padding: 4
+            }}>
+              <img src="/passary-logo.png" alt="Passary Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            </div>
+
+            {!collapsed && (
+              <div style={{ overflow: 'hidden' }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', lineHeight: 1.2, letterSpacing: -0.2 }}>
+                  Passary <span style={{ color: '#059669' }}>Car System</span>
+                </div>
+              </div>
+            )}
+
+            {!collapsed && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setCollapsed(true); setMobileOpen(false); }}
+                style={{
+                  marginLeft: 'auto', background: '#f8fafc', border: '1px solid #e2e8f0',
+                  borderRadius: 8, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', color: '#64748b', flexShrink: 0, transition: 'all 0.15s'
+                }}
+                title="Collapse sidebar"
+              >
+                <ChevronLeft size={14} />
+              </button>
+            )}
+
+            {mobileOpen && (
+              <button onClick={() => setMobileOpen(false)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', marginLeft: 4 }}>
+                <X size={18} />
+              </button>
+            )}
           </div>
 
-          {!collapsed && (
-            <div style={{ overflow: 'hidden' }}>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', lineHeight: 1.2, letterSpacing: -0.2 }}>
-                Passary <span style={{ color: '#059669' }}>Car System</span>
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={() => { setCollapsed(!collapsed); setMobileOpen(false); }}
-            style={{
-              marginLeft: 'auto', background: '#f8fafc', border: '1px solid #e2e8f0',
-              borderRadius: 8, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', color: '#64748b', flexShrink: 0, transition: 'all 0.15s'
-            }}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-          </button>
-          
-          {mobileOpen && (
-            <button onClick={() => setMobileOpen(false)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', marginLeft: 4 }}>
-              <X size={18} />
+          {/* Prominent Expand Button when sidebar is collapsed */}
+          {collapsed && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setCollapsed(false); }}
+              style={{
+                background: '#ecfdf5',
+                border: '1.5px solid #a7f3d0',
+                borderRadius: 8,
+                width: 36,
+                height: 28,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: '#059669',
+                transition: 'all 0.2s',
+                boxShadow: '0 2px 5px rgba(5, 150, 105, 0.15)'
+              }}
+              title="Expand Sidebar"
+            >
+              <ChevronRight size={16} strokeWidth={2.5} />
             </button>
           )}
         </div>

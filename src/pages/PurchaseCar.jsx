@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Car, Plus, Search, Edit2, Trash2, Eye, X, Filter, CreditCard, User, Shield, FileText, CheckCircle, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getCars, addCar, updateCar, deleteCar, getInsurance, onStoreUpdate } from '../store/dataStore';
+import { getCars, addCar, updateCar, deleteCar, getInsurance, getMasterFirmNames, onStoreUpdate } from '../store/dataStore';
 import { generateVehicleId } from '../utils/idGenerator';
 import { formatDate, today } from '../utils/dateUtils';
 import { validateForm, required, phone, positiveNumber } from '../utils/validators';
@@ -17,10 +17,11 @@ import Pagination from '../components/ui/Pagination';
 import EmptyState from '../components/ui/EmptyState';
 import FileUpload from '../components/ui/FileUpload';
 import ReadOnlyNotice from '../components/shared/ReadOnlyNotice';
+import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 import { openDocument } from '../utils/fileUtils';
 
 const EMPTY_FORM = {
-  carName: '', dateOfPurchase: '', modelNo: '', companyPurchasedFrom: '',
+  firmName: '', carName: '', dateOfPurchase: '', modelNo: '', companyPurchasedFrom: '',
   fuelType: '', registrationNo: '', chassisNo: '', engineNo: '',
   hypothecationBank: '', lastEmiDate: '', dateOfReleaseHypothecation: '',
   valueOfCar: '', emiAmount: '', insuranceAmount: '', rtoAmount: '',
@@ -47,9 +48,18 @@ const FormField = ({ label, required: req, error, children }) => (
 
 const CarForm = ({ car, cars, onClose, onSaved }) => {
   const isEdit = !!car;
-  const [form, setForm] = useState(isEdit ? { ...car } : { ...EMPTY_FORM });
+  const [form, setForm] = useState(isEdit ? { ...EMPTY_FORM, ...car } : { ...EMPTY_FORM });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [firmNames, setFirmNames] = useState([]);
+
+  useEffect(() => {
+    const fetchFirms = async () => {
+      const firms = await getMasterFirmNames();
+      setFirmNames(firms);
+    };
+    fetchFirms();
+  }, []);
 
   const set = (field, value) => setForm(f => ({ ...f, [field]: value }));
 
@@ -110,6 +120,18 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
         <div className="form-section-title">Vehicle Information</div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 28 }}>
+        <FormField label="Firm Name" error={errors.firmName}>
+          <select
+            className={`form-select ${errors.firmName ? 'error' : ''}`}
+            value={form.firmName || ''}
+            onChange={e => set('firmName', e.target.value)}
+          >
+            <option value="">Select Firm Name</option>
+            {firmNames.map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+        </FormField>
         <FormField label="Name of Car / Vehicle" required error={errors.carName}>
           <input className={`form-input ${errors.carName ? 'error' : ''}`} value={form.carName}
             onChange={e => set('carName', e.target.value)} placeholder="e.g. Toyota Fortuner" />
@@ -238,7 +260,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
 const ViewCar = ({ car, insurance }) => {
   const ins = insurance.find(i => i.vehicleId === car.vehicleId);
   const fields = [
-    ['Vehicle ID', car.vehicleId], ['Registration No.', car.registrationNo],
+    ['Vehicle ID', car.vehicleId], ['Firm Name', car.firmName], ['Registration No.', car.registrationNo],
     ['Car Name', car.carName], ['Model No.', car.modelNo],
     ['Fuel Type', car.fuelType], ['Purchase Date', formatDate(car.dateOfPurchase)],
     ['Company Purchased From', car.companyPurchasedFrom], ['Chassis No.', car.chassisNo],
@@ -338,7 +360,8 @@ const PurchaseCar = () => {
   const filtered = cars.filter(c => {
     const q = search.toLowerCase();
     const match = !q || c.carName?.toLowerCase().includes(q) || c.vehicleId?.toLowerCase().includes(q)
-      || c.registrationNo?.toLowerCase().includes(q) || c.modelNo?.toLowerCase().includes(q);
+      || c.registrationNo?.toLowerCase().includes(q) || c.modelNo?.toLowerCase().includes(q)
+      || c.firmName?.toLowerCase().includes(q);
     const fuel = !fuelFilter || c.fuelType === fuelFilter;
     return match && fuel;
   });
@@ -404,8 +427,8 @@ const PurchaseCar = () => {
         {/* Table */}
         <div style={{ overflowX: 'auto' }}>
           {loading ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px', gap: 12 }}>
-              <span className="spinner" /> <span style={{ color: '#64748b', fontWeight: 600 }}>Loading vehicles...</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+              <SpeedingCarLoader size="medium" />
             </div>
           ) : paged.length === 0 ? (
             <EmptyState icon={Car} title="No vehicles found"
@@ -418,6 +441,7 @@ const PurchaseCar = () => {
                 <tr>
                   <th>Vehicle ID</th>
                   <th>Car Name</th>
+                  <th>Firm Name</th>
                   <th>Reg. No.</th>
                   <th>Fuel</th>
                   <th>Purchase Date</th>
@@ -436,6 +460,7 @@ const PurchaseCar = () => {
                     <tr key={car.vehicleId}>
                       <td><span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#059669' }}>{car.vehicleId}</span></td>
                       <td><div style={{ fontWeight: 700, color: '#0f172a' }}>{car.carName}</div><div style={{ fontSize: 11.5, color: '#64748b' }}>{car.modelNo}</div></td>
+                      <td><span style={{ fontWeight: 600, color: '#334155' }}>{car.firmName || '—'}</span></td>
                       <td><span style={{ fontWeight: 600 }}>{car.registrationNo}</span></td>
                       <td><Badge label={car.fuelType || '—'} variant="info" /></td>
                       <td>{formatDate(car.dateOfPurchase)}</td>

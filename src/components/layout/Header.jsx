@@ -5,7 +5,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 
-const Header = ({ onMenuToggle }) => {
+const Header = ({ onMenuToggle, collapsed, onToggleSidebar }) => {
   const [search, setSearch] = useState('');
   const [profileDropdown, setProfileDropdown] = useState(false);
   
@@ -34,18 +34,25 @@ const Header = ({ onMenuToggle }) => {
 
   return (
     <header className="header">
-        {/* Mobile menu toggle */}
+        {/* Sidebar / Mobile menu toggle button */}
         <button
-          onClick={onMenuToggle}
+          onClick={() => {
+            if (window.innerWidth <= 768) {
+              if (onMenuToggle) onMenuToggle();
+            } else {
+              if (onToggleSidebar) onToggleSidebar();
+            }
+          }}
           style={{
-            background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 10,
+            background: '#ffffff', border: '1.5px solid #e2f0e7', borderRadius: 10,
             width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#334155', cursor: 'pointer', transition: 'all 0.15s'
+            color: '#059669', cursor: 'pointer', transition: 'all 0.15s',
+            boxShadow: '0 2px 5px rgba(5, 150, 105, 0.1)'
           }}
           className="mobile-menu-btn"
-          title="Toggle Menu"
+          title={collapsed ? "Expand Sidebar" : "Toggle Sidebar / Menu"}
         >
-          <Menu size={19} />
+          <Menu size={19} strokeWidth={2.2} />
         </button>
 
         {/* Header Brand */}

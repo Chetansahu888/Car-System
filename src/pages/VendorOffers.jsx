@@ -17,6 +17,7 @@ import Pagination from '../components/ui/Pagination';
 import EmptyState from '../components/ui/EmptyState';
 import FileUpload from '../components/ui/FileUpload';
 import LoadingOverlay from '../components/ui/LoadingOverlay';
+import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 
 // ─── Vendor Offer Creation Form Modal ─────────────────────────────────────────
 const CreateOfferModal = ({ repair, repairTypes, onClose, onSaved }) => {
@@ -451,8 +452,8 @@ const VendorOffers = () => {
 
         <div style={{ overflowX: 'auto' }}>
           {loading ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48, gap: 12 }}>
-              <span className="spinner" /> <span style={{ color: '#64748b', fontWeight: 600 }}>Loading vendor offers...</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+              <SpeedingCarLoader size="medium" />
             </div>
           ) : currentList.length === 0 ? (
             <EmptyState

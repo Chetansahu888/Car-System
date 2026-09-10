@@ -13,6 +13,7 @@ import {
 } from '../store/dataStore';
 import { daysUntil, formatDate } from '../utils/dateUtils';
 import Badge from '../components/ui/Badge';
+import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 
 const StatCard = ({ icon: Icon, label, value, sub, color, bgColor, onClick, alert }) => (
   <div className="stat-card" onClick={onClick} style={{ cursor: 'pointer' }}>
@@ -148,9 +149,8 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: 14 }}>
-        <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
-        <span style={{ color: '#64748b', fontSize: 15, fontWeight: 600 }}>Loading Dashboard...</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+        <SpeedingCarLoader size="medium" />
       </div>
     );
   }
