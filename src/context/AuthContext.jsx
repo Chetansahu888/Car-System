@@ -7,6 +7,8 @@ const USERS_STORAGE_KEY = 'cms_users';
 export const PAGE_KEYS = {
   DASHBOARD: 'dashboard',
   PURCHASE_CAR: 'purchase_car',
+  CHALLANS: 'challans',
+  FASTAG: 'fastag',
   INSURANCE: 'insurance',
   CAR_REPAIR: 'car_repair',
   ACCIDENT_CLAIMS: 'accident_claims',
@@ -19,6 +21,8 @@ export const PAGE_KEYS = {
 export const PAGE_CONFIG = [
   { key: PAGE_KEYS.DASHBOARD, label: 'Dashboard', path: '/', defaultLevel: 'full' },
   { key: PAGE_KEYS.PURCHASE_CAR, label: 'Purchase Car', path: '/purchase-car', defaultLevel: 'full' },
+  { key: PAGE_KEYS.CHALLANS, label: 'Challan', path: '/challans', defaultLevel: 'full' },
+  { key: PAGE_KEYS.FASTAG, label: 'Fastag', path: '/fastags', defaultLevel: 'full' },
   { key: PAGE_KEYS.INSURANCE, label: 'Insurance', path: '/insurance', defaultLevel: 'full' },
   { key: PAGE_KEYS.CAR_REPAIR, label: 'Car Repair', path: '/car-repair', defaultLevel: 'full' },
   { key: PAGE_KEYS.ACCIDENT_CLAIMS, label: 'Accident / Claims', path: '/accident-claims', defaultLevel: 'full' },
@@ -57,6 +61,8 @@ const DEFAULT_USERS = [
     permissions: {
       [PAGE_KEYS.DASHBOARD]: ACCESS_LEVELS.FULL,
       [PAGE_KEYS.PURCHASE_CAR]: ACCESS_LEVELS.VIEW,
+      [PAGE_KEYS.CHALLANS]: ACCESS_LEVELS.FULL,
+      [PAGE_KEYS.FASTAG]: ACCESS_LEVELS.FULL,
       [PAGE_KEYS.INSURANCE]: ACCESS_LEVELS.VIEW,
       [PAGE_KEYS.CAR_REPAIR]: ACCESS_LEVELS.FULL,
       [PAGE_KEYS.ACCIDENT_CLAIMS]: ACCESS_LEVELS.FULL,
@@ -164,6 +170,7 @@ export const AuthProvider = ({ children }) => {
     if (!currentUser) return false;
     if (currentUser.role === 'admin') return true;
     const perm = currentUser.permissions?.[pageKey];
+    if (perm === undefined) return true;
     return perm === ACCESS_LEVELS.VIEW || perm === ACCESS_LEVELS.FULL;
   };
 
@@ -174,7 +181,9 @@ export const AuthProvider = ({ children }) => {
   const canEditPage = (pageKey) => {
     if (!currentUser) return false;
     if (currentUser.role === 'admin') return true;
-    return currentUser.permissions?.[pageKey] === ACCESS_LEVELS.FULL;
+    const perm = currentUser.permissions?.[pageKey];
+    if (perm === undefined) return true;
+    return perm === ACCESS_LEVELS.FULL;
   };
 
   /**
@@ -183,7 +192,7 @@ export const AuthProvider = ({ children }) => {
   const getPageAccessLevel = (pageKey) => {
     if (!currentUser) return ACCESS_LEVELS.NONE;
     if (currentUser.role === 'admin') return ACCESS_LEVELS.FULL;
-    return currentUser.permissions?.[pageKey] || ACCESS_LEVELS.NONE;
+    return currentUser.permissions?.[pageKey] || ACCESS_LEVELS.FULL;
   };
 
   // User Management functions (Admin only)

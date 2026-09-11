@@ -13,6 +13,8 @@ const KEYS = {
   DELIVERY_PLANNING: 'cms_delivery_planning',
   DELIVERIES: 'cms_deliveries',
   PAYMENTS: 'cms_payments',
+  CHALLANS: 'cms_challans',
+  FASTAGS: 'cms_fastags',
 };
 
 const notifyStoreUpdate = () => {
@@ -512,8 +514,21 @@ const seed = () => {
   localStorage.setItem(KEYS.DELIVERY_PLANNING, JSON.stringify(deliveryPlanning));
   localStorage.setItem(KEYS.DELIVERIES, JSON.stringify(deliveries));
   localStorage.setItem(KEYS.PAYMENTS, JSON.stringify(payments));
+  if (!localStorage.getItem(KEYS.CHALLANS)) {
+    localStorage.setItem(KEYS.CHALLANS, JSON.stringify([]));
+  }
+  if (!localStorage.getItem(KEYS.FASTAGS)) {
+    localStorage.setItem(KEYS.FASTAGS, JSON.stringify([]));
+  }
   localStorage.setItem(version, '1');
 };
+
+if (!localStorage.getItem(KEYS.CHALLANS)) {
+  localStorage.setItem(KEYS.CHALLANS, JSON.stringify([]));
+}
+if (!localStorage.getItem(KEYS.FASTAGS)) {
+  localStorage.setItem(KEYS.FASTAGS, JSON.stringify([]));
+}
 
 seed();
 
@@ -666,6 +681,36 @@ export const syncAllFromSheets = async (silent = false) => {
           const newKey = mappedIns.map(i => `${i.carName}-${i.date}-${i.totalPremiumAmount}-${i.idvValue}`).join('|');
           if (currentKey !== newKey) {
             localStorage.setItem(KEYS.INSURANCE, JSON.stringify(mappedIns));
+            changed = true;
+          }
+        }
+      }
+
+      // 5. Challans
+      const challansData = remoteData['Challan Details'] || remoteData['Challans'] || remoteData['challans'] || remoteData['Challan'];
+      if (Array.isArray(challansData) && challansData.length > 0) {
+        const mappedChallans = challansData.map(mapSheetRowToChallan).filter(Boolean);
+        if (mappedChallans.length > 0) {
+          const current = load(KEYS.CHALLANS);
+          const currentKey = current.map(c => `${c.id}-${c.vehicleId}-${c.paymentStatus}-${c.challanAmount}`).join('|');
+          const newKey = mappedChallans.map(c => `${c.id}-${c.vehicleId}-${c.paymentStatus}-${c.challanAmount}`).join('|');
+          if (currentKey !== newKey) {
+            localStorage.setItem(KEYS.CHALLANS, JSON.stringify(mappedChallans));
+            changed = true;
+          }
+        }
+      }
+
+      // 6. Fastags
+      const fastagData = remoteData['Fastag Details'] || remoteData['Fastags'] || remoteData['fastag'] || remoteData['Fastag'];
+      if (Array.isArray(fastagData) && fastagData.length > 0) {
+        const mappedFastags = fastagData.map(mapSheetRowToFastag).filter(Boolean);
+        if (mappedFastags.length > 0) {
+          const current = load(KEYS.FASTAGS);
+          const currentKey = current.map(f => `${f.vehicleId}-${f.tagId}-${f.fastagStatus}-${f.balance}`).join('|');
+          const newKey = mappedFastags.map(f => `${f.vehicleId}-${f.tagId}-${f.fastagStatus}-${f.balance}`).join('|');
+          if (currentKey !== newKey) {
+            localStorage.setItem(KEYS.FASTAGS, JSON.stringify(mappedFastags));
             changed = true;
           }
         }
@@ -1248,3 +1293,277 @@ export const updatePaymentStatus = async (repairNo, status) => {
   }
   return payments[idx];
 };
+
+// ─── MAPPER FOR "Challan Details" SHEET ───────────────────────────────────────
+export const mapChallanToSheet = (ch) => ({
+  "Timestamp": ch.timestamp || ch.createdAt || createTimestamp(),
+  "Challan ID": ch.id || '',
+  "Challan No": ch.challanNo || '',
+  "Vehicle ID": ch.vehicleId || '',
+  "Car Name": ch.carName || '',
+  "Firm Name": ch.firmName || '',
+  "Reg. No": ch.registrationNo || '',
+  "Fuel": ch.fuelType || '',
+  "Owner": ch.owner || '',
+  "Date of Challan": ch.dateOfChallan || '',
+  "Reason of Challan": ch.reasonOfChallan || '',
+  "Who is Driver": ch.driverName || '',
+  "Driver Mobile": ch.driverMobile || '',
+  "Challan Amount": ch.challanAmount || '',
+  "Location / Authority": ch.location || '',
+  "Payment Status": ch.paymentStatus || 'Pending',
+  "Payment Date": ch.paymentDate || '',
+  "Transaction ID": ch.transactionId || '',
+  "Challan Document": typeof ch.documentUrl === 'string' ? ch.documentUrl : (ch.documentUrl?.url || ''),
+  "Remarks": ch.remarks || '',
+});
+
+export const mapSheetRowToChallan = (row, index) => {
+  if (!row || typeof row !== 'object') return null;
+  const get = (...keys) => {
+    for (const k of keys) {
+      if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+        return String(row[k]).trim();
+      }
+      const target = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const [rk, rv] of Object.entries(row)) {
+        if (rk.toLowerCase().replace(/[^a-z0-9]/g, '') === target && rv !== undefined && rv !== null && String(rv).trim() !== '') {
+          return String(rv).trim();
+        }
+      }
+    }
+    return '';
+  };
+
+  const challanNo = get('Challan No', 'challanNo', 'CHALLAN NO', 'Challan Number');
+  const vehicleId = get('Vehicle ID', 'vehicleId', 'VEHICLE ID');
+  const regNo = get('Reg. No', 'Reg No', 'registrationNo', 'REGISTRATION NO.');
+  if (!challanNo && !vehicleId && !regNo) return null;
+
+  return {
+    id: get('Challan ID', 'id') || `CH-${Date.now()}-${index}`,
+    challanNo: challanNo || `CH-${String(index + 1).padStart(4, '0')}`,
+    vehicleId: vehicleId || '',
+    carName: get('Car Name', 'carName', 'NAME OF CAR / Vehicle'),
+    firmName: get('Firm Name', 'firmName'),
+    registrationNo: regNo,
+    fuelType: get('Fuel', 'fuelType', 'FUEL TYPE'),
+    owner: get('Owner', 'owner', 'Name Of The Owner'),
+    dateOfChallan: get('Date of Challan', 'dateOfChallan', 'date'),
+    reasonOfChallan: get('Reason of Challan', 'reasonOfChallan', 'reason'),
+    driverName: get('Who is Driver', 'driverName', 'driver'),
+    driverMobile: get('Driver Mobile', 'driverMobile'),
+    challanAmount: get('Challan Amount', 'challanAmount', 'amount'),
+    location: get('Location / Authority', 'location', 'authority'),
+    paymentStatus: get('Payment Status', 'paymentStatus') || 'Pending',
+    paymentDate: get('Payment Date', 'paymentDate'),
+    transactionId: get('Transaction ID', 'transactionId'),
+    documentUrl: get('Challan Document', 'documentUrl', 'document'),
+    remarks: get('Remarks', 'remarks'),
+    timestamp: get('Timestamp', 'timestamp') || createTimestamp(),
+    createdAt: get('Timestamp', 'createdAt') || createTimestamp(),
+  };
+};
+
+// ─── CHALLANS CRUD ────────────────────────────────────────────────────────────
+export const getChallans = async () => {
+  await delay();
+  return load(KEYS.CHALLANS);
+};
+
+export const addChallan = async (challanData) => {
+  const challans = load(KEYS.CHALLANS);
+  const now = createTimestamp();
+  const id = `ch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const newChallan = {
+    ...challanData,
+    id,
+    paymentStatus: challanData.paymentStatus || 'Pending',
+    timestamp: now,
+    createdAt: now,
+  };
+  challans.push(newChallan);
+  save(KEYS.CHALLANS, challans);
+
+  await sendToSheet({
+    action: 'add',
+    sheetName: 'Challan Details',
+    data: mapChallanToSheet(newChallan)
+  });
+
+  return newChallan;
+};
+
+export const updateChallan = async (id, updates) => {
+  const challans = load(KEYS.CHALLANS);
+  const idx = challans.findIndex(c => c.id === id);
+  if (idx === -1) throw new Error('Challan record not found');
+  const now = createTimestamp();
+  challans[idx] = { ...challans[idx], ...updates, updatedAt: now };
+  save(KEYS.CHALLANS, challans);
+
+  await sendToSheet({
+    action: 'update',
+    sheetName: 'Challan Details',
+    keyField: 'Challan ID',
+    keyValue: id,
+    data: mapChallanToSheet(challans[idx])
+  });
+
+  return challans[idx];
+};
+
+export const deleteChallan = async (id) => {
+  const challans = load(KEYS.CHALLANS);
+  const target = challans.find(c => c.id === id);
+  const filtered = challans.filter(c => c.id !== id);
+  save(KEYS.CHALLANS, filtered);
+
+  if (target) {
+    sendToSheet({
+      action: 'delete',
+      sheetName: 'Challan Details',
+      keyField: 'Challan ID',
+      keyValue: id
+    });
+  }
+  return true;
+};
+
+// ─── MAPPER FOR "Fastag Details" SHEET ────────────────────────────────────────
+export const mapFastagToSheet = (ft) => ({
+  "Timestamp": ft.timestamp || ft.createdAt || createTimestamp(),
+  "Vehicle ID": ft.vehicleId || '',
+  "Car Name": ft.carName || '',
+  "Firm Name": ft.firmName || '',
+  "Reg. No": ft.registrationNo || '',
+  "Fuel": ft.fuelType || '',
+  "Owner": ft.owner || '',
+  "Fastag Status": ft.fastagStatus || 'Active',
+  "Tag ID": ft.tagId || '',
+  "Issuing Bank": ft.bankName || '',
+  "Vehicle Class": ft.vehicleClass || 'VC4',
+  "Linked Mobile": ft.linkedMobile || '',
+  "Wallet ID": ft.walletId || '',
+  "Balance": ft.balance || '0',
+  "Low Balance Limit": ft.lowBalanceLimit || '200',
+  "Activation Date": ft.activationDate || '',
+  "Expiry Date": ft.expiryDate || '',
+  "Barcode Document": typeof ft.documentUrl === 'string' ? ft.documentUrl : (ft.documentUrl?.url || ''),
+  "Remarks": ft.remarks || '',
+});
+
+export const mapSheetRowToFastag = (row, index) => {
+  if (!row || typeof row !== 'object') return null;
+  const get = (...keys) => {
+    for (const k of keys) {
+      if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+        return String(row[k]).trim();
+      }
+      const target = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const [rk, rv] of Object.entries(row)) {
+        if (rk.toLowerCase().replace(/[^a-z0-9]/g, '') === target && rv !== undefined && rv !== null && String(rv).trim() !== '') {
+          return String(rv).trim();
+        }
+      }
+    }
+    return '';
+  };
+
+  const vehicleId = get('Vehicle ID', 'vehicleId', 'VEHICLE ID');
+  const regNo = get('Reg. No', 'Reg No', 'registrationNo', 'REGISTRATION NO.');
+  const tagId = get('Tag ID', 'tagId', 'TAG ID');
+  if (!vehicleId && !regNo && !tagId) return null;
+
+  return {
+    id: get('id') || `FT-${vehicleId || regNo || index}`,
+    vehicleId: vehicleId || '',
+    carName: get('Car Name', 'carName', 'NAME OF CAR / Vehicle'),
+    firmName: get('Firm Name', 'firmName'),
+    registrationNo: regNo,
+    fuelType: get('Fuel', 'fuelType', 'FUEL TYPE'),
+    owner: get('Owner', 'owner', 'Name Of The Owner'),
+    fastagStatus: get('Fastag Status', 'fastagStatus', 'status') || 'Active',
+    tagId: tagId || '',
+    bankName: get('Issuing Bank', 'bankName', 'bank'),
+    vehicleClass: get('Vehicle Class', 'vehicleClass') || 'VC4',
+    linkedMobile: get('Linked Mobile', 'linkedMobile', 'mobile'),
+    walletId: get('Wallet ID', 'walletId'),
+    balance: get('Balance', 'balance') || '0',
+    lowBalanceLimit: get('Low Balance Limit', 'lowBalanceLimit') || '200',
+    activationDate: get('Activation Date', 'activationDate'),
+    expiryDate: get('Expiry Date', 'expiryDate'),
+    documentUrl: get('Barcode Document', 'documentUrl', 'document'),
+    remarks: get('Remarks', 'remarks'),
+    timestamp: get('Timestamp', 'timestamp') || createTimestamp(),
+    createdAt: get('Timestamp', 'createdAt') || createTimestamp(),
+  };
+};
+
+// ─── FASTAG CRUD ──────────────────────────────────────────────────────────────
+export const getFastags = async () => {
+  await delay();
+  return load(KEYS.FASTAGS);
+};
+
+export const saveFastag = async (fastagData) => {
+  const fastags = load(KEYS.FASTAGS);
+  const now = createTimestamp();
+  const idx = fastags.findIndex(f => (fastagData.vehicleId && f.vehicleId === fastagData.vehicleId) || (fastagData.registrationNo && f.registrationNo === fastagData.registrationNo));
+
+  let savedRecord;
+  if (idx !== -1) {
+    savedRecord = {
+      ...fastags[idx],
+      ...fastagData,
+      fastagStatus: fastagData.fastagStatus || 'Active',
+      updatedAt: now,
+    };
+    fastags[idx] = savedRecord;
+    save(KEYS.FASTAGS, fastags);
+
+    await sendToSheet({
+      action: 'update',
+      sheetName: 'Fastag Details',
+      keyField: 'Vehicle ID',
+      keyValue: savedRecord.vehicleId,
+      data: mapFastagToSheet(savedRecord)
+    });
+  } else {
+    savedRecord = {
+      ...fastagData,
+      id: fastagData.id || `ft_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      fastagStatus: fastagData.fastagStatus || 'Active',
+      timestamp: now,
+      createdAt: now,
+    };
+    fastags.push(savedRecord);
+    save(KEYS.FASTAGS, fastags);
+
+    await sendToSheet({
+      action: 'add',
+      sheetName: 'Fastag Details',
+      data: mapFastagToSheet(savedRecord)
+    });
+  }
+
+  return savedRecord;
+};
+
+export const deleteFastag = async (vehicleId) => {
+  const fastags = load(KEYS.FASTAGS);
+  const target = fastags.find(f => f.vehicleId === vehicleId || f.id === vehicleId);
+  const filtered = fastags.filter(f => f.vehicleId !== vehicleId && f.id !== vehicleId);
+  save(KEYS.FASTAGS, filtered);
+
+  if (target) {
+    sendToSheet({
+      action: 'delete',
+      sheetName: 'Fastag Details',
+      keyField: 'Vehicle ID',
+      keyValue: target.vehicleId
+    });
+  }
+  return true;
+};
+

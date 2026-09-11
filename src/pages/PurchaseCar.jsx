@@ -1,6 +1,6 @@
 // pages/PurchaseCar.jsx
 import { useState, useEffect, useCallback } from 'react';
-import { Car, Plus, Search, Edit2, Trash2, Eye, X, Filter, CreditCard, User, Shield, FileText, CheckCircle, Lock } from 'lucide-react';
+import { Car, Plus, Search, Edit2, Trash2, Eye, X, Filter, CreditCard, User, Shield, FileText, CheckCircle, Lock, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getCars, addCar, updateCar, deleteCar, getInsurance, getMasterFirmNames, onStoreUpdate } from '../store/dataStore';
 import { generateVehicleId } from '../utils/idGenerator';

@@ -2,11 +2,14 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Car, Shield, Wrench, AlertTriangle,
-  Store, CheckCircle, Truck, CreditCard,
+  Store, CheckCircle, Truck, CreditCard, FileWarning,
   ChevronLeft, ChevronRight, X, Users, Lock, Eye
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { getRepairs, getVendorOffers, getClaims, getDeliveries, getPayments } from '../../store/dataStore';
+import {
+  getRepairs, getVendorOffers, getClaims, getDeliveries,
+  getPayments, getCars, getChallans, getFastags
+} from '../../store/dataStore';
 import { useAuth, PAGE_KEYS, ACCESS_LEVELS } from '../../context/AuthContext';
 
 const NAV_GROUPS = [
@@ -20,6 +23,8 @@ const NAV_GROUPS = [
     section: 'Vehicles',
     items: [
       { to: '/purchase-car', label: 'Purchase Car', icon: Car, pageKey: PAGE_KEYS.PURCHASE_CAR },
+      { to: '/challans', label: 'Challan', icon: AlertTriangle, badgeKey: 'challans', pageKey: PAGE_KEYS.CHALLANS },
+      { to: '/fastags', label: 'Fastag', icon: CreditCard, badgeKey: 'fastag', pageKey: PAGE_KEYS.FASTAG },
     ],
   },
   {
@@ -54,9 +59,15 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
   useEffect(() => {
     const fetchCounts = async () => {
       try {
-        const [repairs, offers, claims, deliveries, payments] = await Promise.all([
-          getRepairs(), getVendorOffers(), getClaims(), getDeliveries(), getPayments()
+        const [repairs, offers, claims, deliveries, payments, cars, challans, fastags] = await Promise.all([
+          getRepairs(), getVendorOffers(), getClaims(), getDeliveries(), getPayments(),
+          getCars(), getChallans(), getFastags()
         ]);
+        const missingFastagCount = cars.filter(c => {
+          const hasFt = fastags.some(f => f.vehicleId === c.vehicleId || (c.registrationNo && f.registrationNo === c.registrationNo));
+          return !hasFt;
+        }).length;
+
         setCounts({
           repairs: repairs.filter(r => r.repairStatus !== 'Payment Completed').length,
           offers: offers.filter(o => o.approvalStatus === 'Pending').length,
@@ -64,6 +75,8 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
           approvals: offers.filter(o => o.approvalStatus === 'Pending').length,
           deliveries: deliveries.filter(d => d.deliveryStatus === 'Delivery Pending').length,
           payments: payments.filter(p => p.paymentStatus === 'Payment Pending').length,
+          challans: challans.filter(c => c.paymentStatus === 'Pending').length,
+          fastag: missingFastagCount > 0 ? missingFastagCount : undefined,
         });
       } catch {
         // silent fallback
@@ -93,27 +106,27 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
           style={{
             cursor: collapsed ? 'pointer' : 'default',
             justifyContent: collapsed ? 'center' : 'flex-start',
-            padding: collapsed ? '12px 10px 8px' : '16px 18px',
+            padding: collapsed ? '12px 10px 8px' : '14px 14px',
             flexDirection: 'column',
             gap: 8
           }}
           onClick={collapsed ? () => setCollapsed(false) : undefined}
           title={collapsed ? "Click to expand sidebar" : undefined}
         >
-          <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 12, justifyContent: collapsed ? 'center' : 'flex-start' }}>
+          <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 10, justifyContent: collapsed ? 'center' : 'flex-start' }}>
             <div style={{
-              width: 38, height: 38, borderRadius: 10,
+              width: 36, height: 36, borderRadius: 9,
               background: '#ffffff', border: '1.5px solid #e2f0e7',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexShrink: 0, boxShadow: '0 3px 8px rgba(5, 150, 105, 0.12)',
-              overflow: 'hidden', padding: 4
+              overflow: 'hidden', padding: 3
             }}>
               <img src="/passary-logo.png" alt="Passary Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
             </div>
 
             {!collapsed && (
-              <div style={{ overflow: 'hidden' }}>
-                <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', lineHeight: 1.2, letterSpacing: -0.2 }}>
+              <div style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 14.5, fontWeight: 800, color: '#0f172a', lineHeight: 1.2, letterSpacing: -0.2, whiteSpace: 'nowrap' }}>
                   Passary <span style={{ color: '#059669' }}>Car System</span>
                 </div>
               </div>
@@ -125,7 +138,7 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
                 onClick={(e) => { e.stopPropagation(); setCollapsed(true); setMobileOpen(false); }}
                 style={{
                   marginLeft: 'auto', background: '#f8fafc', border: '1px solid #e2e8f0',
-                  borderRadius: 8, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 8, width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   cursor: 'pointer', color: '#64748b', flexShrink: 0, transition: 'all 0.15s'
                 }}
                 title="Collapse sidebar"

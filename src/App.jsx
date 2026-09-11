@@ -10,6 +10,8 @@ import { AuthProvider, PAGE_KEYS } from './context/AuthContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import PurchaseCar from './pages/PurchaseCar';
+import Challans from './pages/Challans';
+import Fastag from './pages/Fastag';
 import Insurance from './pages/Insurance';
 import CarRepair from './pages/CarRepair';
 import AccidentClaims from './pages/AccidentClaims';
@@ -51,6 +53,56 @@ function AppRoutes() {
           <ProtectedRoute pageKey={PAGE_KEYS.PURCHASE_CAR}>
             <Layout>
               <PurchaseCar />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/challans"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.CHALLANS}>
+            <Layout>
+              <Challans />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/purchase-car/challans"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.CHALLANS}>
+            <Layout>
+              <Challans />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fastags"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.FASTAG}>
+            <Layout>
+              <Fastag />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/purchase-car/fastag"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.FASTAG}>
+            <Layout>
+              <Fastag />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fastag"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.FASTAG}>
+            <Layout>
+              <Fastag />
             </Layout>
           </ProtectedRoute>
         }
