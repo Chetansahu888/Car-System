@@ -1,10 +1,27 @@
 // components/ui/SpeedingCarLoader.jsx
 import React from 'react';
 
-export default function SpeedingCarLoader({ size = 'medium' }) {
-  const isLarge = size === 'large';
-  const width = isLarge ? 480 : size === 'small' ? 220 : 360;
-  const height = isLarge ? 150 : size === 'small' ? 75 : 115;
+export default function SpeedingCarLoader({ size = 'medium', style = {} }) {
+  let width = 180;
+  let height = 55;
+
+  if (typeof size === 'number') {
+    width = size;
+    height = Math.round((size / 520) * 160);
+  } else if (size === 'large') {
+    width = 260;
+    height = 80;
+  } else if (size === 'small' || size === 'sm') {
+    width = 110;
+    height = 34;
+  } else if (size === 'xs') {
+    width = 80;
+    height = 25;
+  } else {
+    // medium (default)
+    width = 180;
+    height = 55;
+  }
 
   return (
     <div className="supercar-loader-wrapper" style={{
@@ -17,7 +34,8 @@ export default function SpeedingCarLoader({ size = 'medium' }) {
       maxWidth: width,
       overflow: 'visible',
       userSelect: 'none',
-      pointerEvents: 'none'
+      pointerEvents: 'none',
+      ...style
     }}>
       <svg
         viewBox="0 0 520 160"
