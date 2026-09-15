@@ -8,7 +8,7 @@ import {
 import { useState, useEffect } from 'react';
 import {
   getRepairs, getVendorOffers, getClaims, getDeliveries,
-  getPayments, getCars, getChallans, getFastags
+  getPayments, getCars, getChallans, getFastags, onStoreUpdate
 } from '../../store/dataStore';
 import { useAuth, PAGE_KEYS, ACCESS_LEVELS } from '../../context/AuthContext';
 
@@ -83,6 +83,8 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
       }
     };
     fetchCounts();
+    const unsub = onStoreUpdate(fetchCounts);
+    return () => unsub();
   }, [location.pathname]);
 
   // Filter navigation items by user permissions

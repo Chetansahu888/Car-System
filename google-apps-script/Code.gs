@@ -536,7 +536,7 @@ function doPost(e) {
         for (let r = headerRowIndex; r < allRows.length; r++) {
           if (String(allRows[r][headerColIndex]).trim().toLowerCase() === String(keyValue).trim().toLowerCase()) {
             if (isFMS) {
-              sheet.getRange(r + 1, 1, 1, 9).clearContent();
+              sheet.getRange(r + 1, 1, 1, Math.max(sheet.getLastColumn(), 35)).clearContent();
             } else {
               sheet.deleteRow(r + 1);
             }
