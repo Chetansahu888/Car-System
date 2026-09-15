@@ -1,5 +1,6 @@
 // context/AuthContext.jsx
 import { createContext, useContext, useState, useEffect } from 'react';
+import { addUserToSheet, updateUserInSheet, deleteUserFromSheet, pushUsersToSheet, syncUsersFromSheet } from '../store/dataStore';
 
 const AUTH_STORAGE_KEY = 'cms_current_user';
 const USERS_STORAGE_KEY = 'cms_users';
@@ -118,6 +119,41 @@ export const AuthProvider = ({ children }) => {
 
   const [loading, setLoading] = useState(false);
 
+  // Live listener for 2-way Google Sheet sync updates
+  useEffect(() => {
+    const handleSync = () => {
+      try {
+        const stored = localStorage.getItem(USERS_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setUsers(parsed);
+
+            // If current user credentials or permissions changed in sheet, update active session in real-time
+            const activeRaw = localStorage.getItem(AUTH_STORAGE_KEY);
+            if (activeRaw) {
+              const active = JSON.parse(activeRaw);
+              const found = parsed.find(u => u.email.toLowerCase() === active.email.toLowerCase());
+              if (found) {
+                setCurrentUser(found);
+                localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(found));
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('User sync listener error:', err);
+      }
+    };
+
+    window.addEventListener('cms_users_updated', handleSync);
+    window.addEventListener('cms_datastore_updated', handleSync);
+    return () => {
+      window.removeEventListener('cms_users_updated', handleSync);
+      window.removeEventListener('cms_datastore_updated', handleSync);
+    };
+  }, []);
+
   // Sync users to local storage
   const saveUsers = (updatedUsers) => {
     setUsers(updatedUsers);
@@ -125,7 +161,7 @@ export const AuthProvider = ({ children }) => {
     
     // Update currentUser if modified
     if (currentUser) {
-      const active = updatedUsers.find(u => u.id === currentUser.id);
+      const active = updatedUsers.find(u => u.id === currentUser.id || u.email.toLowerCase() === currentUser.email.toLowerCase());
       if (active) {
         setCurrentUser(active);
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(active));
@@ -135,7 +171,6 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     setLoading(true);
-    // simulate slight async feel for smoothness
     await new Promise(r => setTimeout(r, 200));
 
     const cleanEmail = (email || '').trim().toLowerCase();
@@ -162,10 +197,6 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem(AUTH_STORAGE_KEY);
   };
 
-  /**
-   * Check if the current user has view or full access to a specific page.
-   * Admin always has access.
-   */
   const hasPageAccess = (pageKey) => {
     if (!currentUser) return false;
     if (currentUser.role === 'admin') return true;
@@ -174,10 +205,6 @@ export const AuthProvider = ({ children }) => {
     return perm === ACCESS_LEVELS.VIEW || perm === ACCESS_LEVELS.FULL;
   };
 
-  /**
-   * Check if current user has full write/edit access (Add, Edit, Delete, Approve) to a specific page.
-   * Admin always has write access.
-   */
   const canEditPage = (pageKey) => {
     if (!currentUser) return false;
     if (currentUser.role === 'admin') return true;
@@ -186,16 +213,13 @@ export const AuthProvider = ({ children }) => {
     return perm === ACCESS_LEVELS.FULL;
   };
 
-  /**
-   * Get exact permission level: 'none' | 'view' | 'full'
-   */
   const getPageAccessLevel = (pageKey) => {
     if (!currentUser) return ACCESS_LEVELS.NONE;
     if (currentUser.role === 'admin') return ACCESS_LEVELS.FULL;
     return currentUser.permissions?.[pageKey] || ACCESS_LEVELS.FULL;
   };
 
-  // User Management functions (Admin only)
+  // User Management functions (2-way live sync with Google Sheet Login Page tab)
   const addUser = (userData) => {
     const newUser = {
       ...userData,
@@ -205,12 +229,21 @@ export const AuthProvider = ({ children }) => {
     };
     const updated = [...users, newUser];
     saveUsers(updated);
+
+    // 2-Way Sync: send to Google Sheet Login Page
+    addUserToSheet(newUser).catch(err => console.warn('Sheet sync error:', err));
     return newUser;
   };
 
   const updateUser = (userId, updatedData) => {
     const updated = users.map(u => u.id === userId ? { ...u, ...updatedData, updatedAt: new Date().toISOString() } : u);
     saveUsers(updated);
+
+    const updatedTarget = updated.find(u => u.id === userId);
+    if (updatedTarget) {
+      // 2-Way Sync: update in Google Sheet Login Page
+      updateUserInSheet(updatedTarget).catch(err => console.warn('Sheet sync error:', err));
+    }
   };
 
   const deleteUser = (userId) => {
@@ -223,10 +256,24 @@ export const AuthProvider = ({ children }) => {
     }
     const updated = users.filter(u => u.id !== userId);
     saveUsers(updated);
+
+    if (target) {
+      // 2-Way Sync: delete from Google Sheet Login Page
+      deleteUserFromSheet(target.email).catch(err => console.warn('Sheet sync error:', err));
+    }
   };
 
   const resetToDefaultUsers = () => {
     saveUsers(DEFAULT_USERS);
+    pushUsersToSheet(DEFAULT_USERS).catch(err => console.warn('Sheet sync error:', err));
+  };
+
+  const syncWithSheetNow = async () => {
+    return await syncUsersFromSheet();
+  };
+
+  const pushUsersToSheetNow = async () => {
+    return await pushUsersToSheet(users);
   };
 
   return (
@@ -244,6 +291,8 @@ export const AuthProvider = ({ children }) => {
         updateUser,
         deleteUser,
         resetToDefaultUsers,
+        syncWithSheetNow,
+        pushUsersToSheetNow,
       }}
     >
       {children}

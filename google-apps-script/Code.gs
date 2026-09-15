@@ -38,7 +38,7 @@ function findHeaderRowInfo(sheet) {
   if (maxScanRows === 0) return { headerRowIndex: 1, headers: [] };
 
   const scanRange = sheet.getRange(1, 1, maxScanRows, Math.max(sheet.getLastColumn(), 1)).getValues();
-  const knownHeaderKeys = ['timestamp', 'carrepairno', 'vehicleid', 'carname', 'registrationno', 'reasonforrepair', 'garage', 'department'];
+  const knownHeaderKeys = ['timestamp', 'carrepairno', 'vehicleid', 'carname', 'registrationno', 'reasonforrepair', 'garage', 'department', 'user', 'email', 'name', 'password', 'role', 'accessiblesteps', 'dashboard'];
 
   let bestRowIndex = 1;
   let maxScore = 0;
@@ -128,21 +128,68 @@ function doPost(e) {
           return n.includes('insurance of vehicle') || n.includes('insurance_of_vehicle') || n === 'insurance';
         });
         if (found) sheet = found;
+      } else if (sheetName.toLowerCase().includes('login') || sheetName.toLowerCase().includes('user')) {
+        const found = ss.getSheets().find(s => {
+          const n = s.getName().trim().toLowerCase();
+          return n === 'login page' || n === 'login' || n === 'users' || n.includes('login');
+        });
+        if (found) sheet = found;
       }
       
       if (!sheet) {
         sheet = ss.insertSheet(sheetName);
-        if (data && typeof data === 'object') {
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
           sheet.appendRow(Object.keys(data));
         }
       }
     }
 
-    const { headerRowIndex, headers } = findHeaderRowInfo(sheet);
-    const processedData = convertAllBase64ToDriveUrls(data);
+    // ─── SPECIAL 0.5: SYNC ALL USERS / INIT LOGIN PAGE ───
+    if ((action === 'sync_all_users' || action === 'init_login_sheet') && (sheetName.toLowerCase().includes('login') || sheetName.toLowerCase().includes('user'))) {
+      const LOGIN_HEADERS = [
+        'Timestamp', 'Name', 'User', 'Password', 'Role', 'Department',
+        'Dashboard', 'Purchase Car', 'Challan', 'Fastag', 'Insurance', 'Car Repair',
+        'Accident / Claims', 'Vendor Offers', 'Approvals', 'Delivery Of Car', 'Payment'
+      ];
+      const userList = Array.isArray(data) ? data : (body.users || (data ? [data] : []));
+      sheet.clear();
+      sheet.appendRow(LOGIN_HEADERS);
+      sheet.getRange(1, 1, 1, LOGIN_HEADERS.length)
+        .setFontWeight('bold')
+        .setBackground('#059669')
+        .setFontColor('#ffffff')
+        .setHorizontalAlignment('center');
+      sheet.setFrozenRows(1);
 
-    if (!processedData['Timestamp'] && !processedData['timestamp']) {
-      processedData['Timestamp'] = formatCustomTimestamp();
+      userList.forEach(u => {
+        if (!u) return;
+        const rowVals = LOGIN_HEADERS.map(h => {
+          const v = findValueByHeader(u, h);
+          return v !== undefined && v !== null ? v : '';
+        });
+        sheet.appendRow(rowVals);
+      });
+
+      const lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        sheet.getRange(2, 1, lastRow - 1, LOGIN_HEADERS.length).setFontSize(10).setVerticalAlignment('middle');
+      }
+
+      return createJsonResponse({
+        status: 'success',
+        message: `Login Page sheet populated with ${userList.length} users and all step columns!`,
+        headers: LOGIN_HEADERS,
+        rowCount: lastRow
+      });
+    }
+
+    const { headerRowIndex, headers } = findHeaderRowInfo(sheet);
+    const processedData = convertAllBase64ToDriveUrls(data) || {};
+
+    if (processedData && typeof processedData === 'object' && Object.keys(processedData).length > 0) {
+      if (!processedData['Timestamp'] && !processedData['timestamp']) {
+        processedData['Timestamp'] = formatCustomTimestamp();
+      }
     }
 
     const sName = sheet.getName().trim().toLowerCase();
@@ -422,7 +469,9 @@ function doPost(e) {
       let headerColIndex = -1;
 
       for (let i = 0; i < headers.length; i++) {
-        if (normalizeKey(headers[i]) === normalizeKey(keyField)) {
+        const normH = normalizeKey(headers[i]);
+        const normK = normalizeKey(keyField);
+        if (normH === normK || ((normK === 'user' || normK === 'email') && (normH === 'user' || normH === 'email' || normH === 'useremail' || normH === 'username'))) {
           headerColIndex = i;
           break;
         }
@@ -431,7 +480,7 @@ function doPost(e) {
       let targetRowIndex = -1;
       if (headerColIndex !== -1) {
         for (let r = headerRowIndex; r < allRows.length; r++) {
-          if (String(allRows[r][headerColIndex]).trim() === String(keyValue).trim()) {
+          if (String(allRows[r][headerColIndex]).trim().toLowerCase() === String(keyValue).trim().toLowerCase()) {
             targetRowIndex = r + 1;
             break;
           }
@@ -475,7 +524,9 @@ function doPost(e) {
       let headerColIndex = -1;
 
       for (let i = 0; i < headers.length; i++) {
-        if (normalizeKey(headers[i]) === normalizeKey(keyField)) {
+        const normH = normalizeKey(headers[i]);
+        const normK = normalizeKey(keyField);
+        if (normH === normK || ((normK === 'user' || normK === 'email') && (normH === 'user' || normH === 'email' || normH === 'useremail' || normH === 'username'))) {
           headerColIndex = i;
           break;
         }
@@ -483,7 +534,7 @@ function doPost(e) {
 
       if (headerColIndex !== -1) {
         for (let r = headerRowIndex; r < allRows.length; r++) {
-          if (String(allRows[r][headerColIndex]).trim() === String(keyValue).trim()) {
+          if (String(allRows[r][headerColIndex]).trim().toLowerCase() === String(keyValue).trim().toLowerCase()) {
             if (isFMS) {
               sheet.getRange(r + 1, 1, 1, 9).clearContent();
             } else {

@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { useAuth, PAGE_CONFIG, ACCESS_LEVELS } from '../context/AuthContext';
 import {
   Users, UserPlus, Shield, Key, Edit2, Trash2, CheckCircle2,
-  XCircle, Eye, ShieldCheck, Lock, Search, Filter, RotateCcw, AlertTriangle, UserCheck
+  XCircle, Eye, ShieldCheck, Lock, Search, Filter, AlertTriangle, UserCheck,
+  RefreshCw
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Modal from '../components/ui/Modal';
@@ -32,14 +33,30 @@ const DEPARTMENTS = [
 ];
 
 export default function UserManagement() {
-  const { users, currentUser, addUser, updateUser, deleteUser, resetToDefaultUsers } = useAuth();
+  const { users, currentUser, addUser, updateUser, deleteUser, syncWithSheetNow } = useAuth();
   
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState(null); // 'add' | 'edit'
   const [selectedUser, setSelectedUser] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_USER });
   const [deleteDialog, setDeleteDialog] = useState(null);
-  const [resetDialog, setResetDialog] = useState(false);
+  const [syncingSheet, setSyncingSheet] = useState(false);
+
+  const handleSyncSheet = async () => {
+    setSyncingSheet(true);
+    try {
+      const res = await syncWithSheetNow();
+      if (res && res.length > 0) {
+        toast.success(`Successfully synced ${res.length} users from Google Sheet!`);
+      } else {
+        toast.error('Could not fetch from sheet or "Login Page" is empty.');
+      }
+    } catch (err) {
+      toast.error('Sync failed: ' + err.message);
+    } finally {
+      setSyncingSheet(false);
+    }
+  };
 
   const openAddModal = () => {
     setSelectedUser(null);
@@ -155,12 +172,6 @@ export default function UserManagement() {
     }
   };
 
-  const handleResetDefaults = () => {
-    resetToDefaultUsers();
-    setResetDialog(false);
-    toast.success('Reset system users to initial demo accounts.');
-  };
-
   const filteredUsers = users.filter(u => {
     const q = search.toLowerCase();
     return !q || u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q) || u.department?.toLowerCase().includes(q);
@@ -171,37 +182,23 @@ export default function UserManagement() {
       {/* Page Header */}
       <div className="page-header">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h1 className="page-title">User Management & Permissions</h1>
-            <span style={{
-              background: '#ecfdf5',
-              border: '1px solid #a7f3d0',
-              color: '#059669',
-              fontSize: 12,
-              fontWeight: 800,
-              padding: '2px 10px',
-              borderRadius: 20,
-              textTransform: 'uppercase',
-              letterSpacing: 0.5,
-            }}>
-              Admin Console
-            </span>
-          </div>
-          <p className="page-subtitle">
-            Configure system accounts and customize page-wise access levels (None, View Only, Full Access).
-          </p>
+          <h1 className="page-title">User Management</h1>
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button
             className="btn btn-outline"
-            onClick={() => setResetDialog(true)}
-            title="Reset to default demo users"
+            onClick={handleSyncSheet}
+            disabled={syncingSheet}
+            title="Refresh & sync with Google Sheet"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <RotateCcw size={15} /> Reset Demo Users
+            <RefreshCw size={15} className={syncingSheet ? 'animate-spin' : ''} />
+            <span>{syncingSheet ? 'Syncing...' : 'Refresh / Sync'}</span>
           </button>
           <button className="btn btn-primary" onClick={openAddModal}>
-            <UserPlus size={16} strokeWidth={2.5} /> Add New User
+            <UserPlus size={16} strokeWidth={2.5} />
+            <span>Add User</span>
           </button>
         </div>
       </div>
@@ -760,19 +757,6 @@ export default function UserManagement() {
           variant="danger"
           onConfirm={handleDeleteUser}
           onClose={() => setDeleteDialog(null)}
-        />
-      )}
-
-      {/* Reset Defaults Confirmation Dialog */}
-      {resetDialog && (
-        <ConfirmDialog
-          isOpen={true}
-          title="Reset Demo Accounts"
-          message="This will reset the user database to the initial 3 demo accounts (Admin, Operations Manager, and Auditor). Are you sure?"
-          confirmLabel="Reset Accounts"
-          variant="warning"
-          onConfirm={handleResetDefaults}
-          onClose={() => setResetDialog(false)}
         />
       )}
     </div>

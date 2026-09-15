@@ -15,7 +15,22 @@ const KEYS = {
   PAYMENTS: 'cms_payments',
   CHALLANS: 'cms_challans',
   FASTAGS: 'cms_fastags',
+  USERS: 'cms_users',
 };
+
+export const PAGE_STEPS = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'purchase_car', label: 'Purchase Car' },
+  { key: 'challans', label: 'Challan' },
+  { key: 'fastag', label: 'Fastag' },
+  { key: 'insurance', label: 'Insurance' },
+  { key: 'car_repair', label: 'Car Repair' },
+  { key: 'accident_claims', label: 'Accident / Claims' },
+  { key: 'vendor_offers', label: 'Vendor Offers' },
+  { key: 'approvals', label: 'Approvals' },
+  { key: 'delivery', label: 'Delivery Of Car' },
+  { key: 'payment', label: 'Payment' },
+];
 
 const notifyStoreUpdate = () => {
   if (typeof window !== 'undefined') {
@@ -41,6 +56,116 @@ const load = (key) => {
 const save = (key, data) => {
   localStorage.setItem(key, JSON.stringify(data));
   notifyStoreUpdate();
+};
+
+// ─── MAPPER FOR "Login Page" SHEET ──────────────────────────────────────────
+export const mapUserToSheet = (user) => {
+  const permissions = user.permissions || {};
+
+  const formatLevel = (key) => {
+    if (user.role === 'admin') return 'Full';
+    const level = permissions[key];
+    if (level === 'full') return 'Full';
+    if (level === 'view') return 'View';
+    return 'None';
+  };
+
+  return {
+    "Timestamp": user.createdAt || user.timestamp || createTimestamp(),
+    "Name": user.name || '',
+    "User": user.email || '',
+    "Password": user.password || '',
+    "Role": user.role === 'admin' ? 'Admin' : 'User',
+    "Department": user.department || 'Operations',
+    "Dashboard": formatLevel('dashboard'),
+    "Purchase Car": formatLevel('purchase_car'),
+    "Challan": formatLevel('challans'),
+    "Fastag": formatLevel('fastag'),
+    "Insurance": formatLevel('insurance'),
+    "Car Repair": formatLevel('car_repair'),
+    "Accident / Claims": formatLevel('accident_claims'),
+    "Vendor Offers": formatLevel('vendor_offers'),
+    "Approvals": formatLevel('approvals'),
+    "Delivery Of Car": formatLevel('delivery'),
+    "Payment": formatLevel('payment'),
+  };
+};
+
+export const mapSheetRowToUser = (row, index) => {
+  if (!row || typeof row !== 'object') return null;
+
+  const get = (...keys) => {
+    for (const k of keys) {
+      if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+        return String(row[k]).trim();
+      }
+      const target = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const [rk, rv] of Object.entries(row)) {
+        if (rk.toLowerCase().replace(/[^a-z0-9]/g, '') === target && rv !== undefined && rv !== null && String(rv).trim() !== '') {
+          return String(rv).trim();
+        }
+      }
+    }
+    return '';
+  };
+
+  const email = get('User', 'User / Email', 'Email', 'Username', 'user', 'email');
+  const name = get('Name', 'Full Name', 'name') || (email ? email.split('@')[0] : `User ${index + 1}`);
+  const password = get('Password', 'Pass', 'password');
+
+  if (!email && !password) return null;
+  const cleanEmail = email.toLowerCase();
+  if (cleanEmail === 'user' || cleanEmail === 'email' || name.toLowerCase() === 'name' || cleanEmail.includes('timestamp')) {
+    return null;
+  }
+
+  const rawRole = get('Role', 'role').toLowerCase();
+  const isAdmin = rawRole === 'admin' || rawRole === 'super admin' || cleanEmail === 'admin@passary.com';
+  const role = isAdmin ? 'admin' : 'user';
+  const department = get('Department', 'department') || (isAdmin ? 'Management' : 'Operations');
+
+  const permissions = {};
+  const accessibleStepsStr = get('Accessible Steps', 'Allowed Steps', 'Access Steps', 'Steps', 'Access').toLowerCase();
+
+  PAGE_STEPS.forEach(p => {
+    const colVal = get(p.label, p.key, p.label.replace(/\s+/g, '')).toLowerCase();
+
+    if (isAdmin) {
+      permissions[p.key] = 'full';
+    } else if (colVal) {
+      if (['full', 'yes', 'y', '1', 'true', 'write', 'edit', 'all'].includes(colVal)) {
+        permissions[p.key] = 'full';
+      } else if (['view', 'read', 'v'].includes(colVal)) {
+        permissions[p.key] = 'view';
+      } else if (['none', 'no', 'n', '0', 'false'].includes(colVal)) {
+        permissions[p.key] = 'none';
+      } else {
+        permissions[p.key] = 'view';
+      }
+    } else if (accessibleStepsStr) {
+      const stepName = p.label.toLowerCase();
+      const stepKey = p.key.toLowerCase();
+      if (accessibleStepsStr.includes(stepName) || accessibleStepsStr.includes(stepKey)) {
+        permissions[p.key] = 'full';
+      } else {
+        permissions[p.key] = 'none';
+      }
+    } else {
+      permissions[p.key] = 'view';
+    }
+  });
+
+  return {
+    id: get('id') || `user_${cleanEmail.replace(/[^a-z0-9]/gi, '_')}`,
+    name,
+    email: email.trim(),
+    password: password || 'pass123',
+    role,
+    department,
+    avatarColor: isAdmin ? '#059669' : '#2563eb',
+    permissions,
+    createdAt: get('Timestamp', 'createdAt') || new Date().toISOString(),
+  };
 };
 
 // ─── MAPPER FOR "Purchase Car Details" SHEET ──────────────────────────────────
@@ -713,6 +838,40 @@ export const syncAllFromSheets = async (silent = false) => {
             localStorage.setItem(KEYS.FASTAGS, JSON.stringify(mappedFastags));
             changed = true;
           }
+        }
+      }
+
+      // 7. Login Page / Users
+      const loginSheetKey = Object.keys(remoteData).find(k => {
+        const norm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return norm === 'loginpage' || norm === 'login' || norm === 'users' || norm === 'logindetails';
+      });
+      const loginRows = loginSheetKey ? remoteData[loginSheetKey] : (remoteData['Login Page'] || remoteData['login page'] || remoteData['Login'] || remoteData['Users']);
+      if (Array.isArray(loginRows) && loginRows.length > 0) {
+        const mappedUsers = loginRows.map(mapSheetRowToUser).filter(Boolean);
+        if (mappedUsers.length > 0) {
+          const currentUsersRaw = localStorage.getItem('cms_users');
+          const currentUsers = currentUsersRaw ? JSON.parse(currentUsersRaw) : [];
+          const currentKey = currentUsers.map(u => `${u.email}-${u.password}-${u.role}-${JSON.stringify(u.permissions || {})}`).join('|');
+          const newKey = mappedUsers.map(u => `${u.email}-${u.password}-${u.role}-${JSON.stringify(u.permissions || {})}`).join('|');
+          if (currentKey !== newKey) {
+            localStorage.setItem('cms_users', JSON.stringify(mappedUsers));
+            changed = true;
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('cms_users_updated', { detail: mappedUsers }));
+            }
+          }
+        }
+      } else if (loginSheetKey && Array.isArray(loginRows) && loginRows.length === 0) {
+        // Tab exists but has 0 rows - initialize it with current users!
+        const currentUsersRaw = localStorage.getItem('cms_users');
+        if (currentUsersRaw) {
+          try {
+            const currentUsers = JSON.parse(currentUsersRaw);
+            if (Array.isArray(currentUsers) && currentUsers.length > 0) {
+              pushUsersToSheet(currentUsers);
+            }
+          } catch (e) {}
         }
       }
 
@@ -1566,4 +1725,69 @@ export const deleteFastag = async (vehicleId) => {
   }
   return true;
 };
+
+// ─── LOGIN PAGE / USER MANAGEMENT LIVE SYNC ─────────────────────────────────
+export const pushUsersToSheet = async (usersList = null) => {
+  const users = usersList || load(KEYS.USERS);
+  if (!users || users.length === 0) return false;
+
+  let allSuccess = true;
+  for (const user of users) {
+    const mapped = mapUserToSheet(user);
+    const ok = await sendToSheet({
+      action: 'update',
+      sheetName: 'Login Page',
+      keyField: 'User',
+      keyValue: user.email,
+      data: mapped
+    });
+    if (!ok) allSuccess = false;
+  }
+  return allSuccess;
+};
+
+export const addUserToSheet = async (user) => {
+  return await sendToSheet({
+    action: 'add',
+    sheetName: 'Login Page',
+    data: mapUserToSheet(user)
+  });
+};
+
+export const updateUserInSheet = async (user) => {
+  return await sendToSheet({
+    action: 'update',
+    sheetName: 'Login Page',
+    keyField: 'User',
+    keyValue: user.email,
+    data: mapUserToSheet(user)
+  });
+};
+
+export const deleteUserFromSheet = async (userEmail) => {
+  return await sendToSheet({
+    action: 'delete',
+    sheetName: 'Login Page',
+    keyField: 'User',
+    keyValue: userEmail,
+    data: { User: userEmail }
+  });
+};
+
+export const syncUsersFromSheet = async () => {
+  const remote = await fetchFromSheet('get_LoginPage', 'Login Page');
+  if (Array.isArray(remote) && remote.length > 0) {
+    const mapped = remote.map(mapSheetRowToUser).filter(Boolean);
+    if (mapped.length > 0) {
+      localStorage.setItem(KEYS.USERS, JSON.stringify(mapped));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cms_users_updated', { detail: mapped }));
+        window.dispatchEvent(new CustomEvent('cms_datastore_updated'));
+      }
+      return mapped;
+    }
+  }
+  return null;
+};
+
 

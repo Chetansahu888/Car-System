@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Mail, Eye, EyeOff, ShieldCheck, ArrowRight, UserCheck, ShieldAlert, Sparkles, Key } from 'lucide-react';
+import { Lock, Mail, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function Login() {
@@ -35,21 +35,6 @@ export default function Login() {
       navigate(from, { replace: true });
     } catch (err) {
       toast.error(err.message || 'Login failed. Please check credentials.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const setDemoAccount = async (demoEmail, demoPass) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
-    setSubmitting(true);
-    try {
-      const user = await login(demoEmail, demoPass);
-      toast.success(`Logged in as ${user.name} (${user.role === 'admin' ? 'Full Admin Access' : 'Custom Page Permissions'})`);
-      navigate(from, { replace: true });
-    } catch (err) {
-      toast.error(err.message || 'Login failed.');
     } finally {
       setSubmitting(false);
     }
@@ -90,23 +75,23 @@ export default function Login() {
       }} />
 
       <div style={{
-        maxWidth: 480,
+        maxWidth: 420,
         width: '100%',
         background: '#ffffff',
-        borderRadius: 24,
-        boxShadow: '0 25px 60px -15px rgba(5, 150, 105, 0.12), 0 0 1px 1px rgba(0, 0, 0, 0.04)',
+        borderRadius: 20,
+        boxShadow: '0 20px 50px -12px rgba(5, 150, 105, 0.15), 0 0 1px 1px rgba(0, 0, 0, 0.04)',
         border: '1px solid #e2f0e7',
         overflow: 'hidden',
         position: 'relative',
         zIndex: 10,
       }}>
-        {/* Header Ribbon */}
+        {/* Top Accent Gradient Line */}
         <div style={{
-          height: 6,
+          height: 5,
           background: 'linear-gradient(90deg, #059669, #10b981, #34d399)',
         }} />
 
-        <div style={{ padding: '36px 32px' }}>
+        <div style={{ padding: '36px 30px' }}>
           {/* Logo & Branding */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 28, textAlign: 'center' }}>
             <div style={{
@@ -118,7 +103,7 @@ export default function Login() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 8px 20px rgba(5, 150, 105, 0.16)',
+              boxShadow: '0 8px 20px rgba(5, 150, 105, 0.14)',
               overflow: 'hidden',
               padding: 6,
               marginBottom: 16,
@@ -135,18 +120,10 @@ export default function Login() {
               fontWeight: 800,
               color: '#0f172a',
               letterSpacing: -0.5,
-              margin: '0 0 6px',
+              margin: 0,
             }}>
               Passary <span style={{ color: '#059669' }}>Car System</span>
             </h1>
-            <p style={{
-              fontSize: 13.5,
-              color: '#64748b',
-              margin: 0,
-              fontWeight: 500,
-            }}>
-              Fleet ERP Enterprise Access & Management
-            </p>
           </div>
 
           {/* Form */}
@@ -155,7 +132,7 @@ export default function Login() {
               <label style={{
                 display: 'block',
                 fontSize: 13,
-                fontWeight: 700,
+                fontWeight: 600,
                 color: '#334155',
                 marginBottom: 6,
               }}>
@@ -178,7 +155,7 @@ export default function Login() {
                   style={{
                     width: '100%',
                     padding: '11px 14px 11px 40px',
-                    borderRadius: 12,
+                    borderRadius: 10,
                     border: '1.5px solid #e2e8f0',
                     fontSize: 14,
                     color: '#0f172a',
@@ -190,7 +167,7 @@ export default function Login() {
                   onFocus={(e) => {
                     e.target.style.borderColor = '#059669';
                     e.target.style.background = '#ffffff';
-                    e.target.style.boxShadow = '0 0 0 4px rgba(5, 150, 105, 0.12)';
+                    e.target.style.boxShadow = '0 0 0 3px rgba(5, 150, 105, 0.12)';
                   }}
                   onBlur={(e) => {
                     e.target.style.borderColor = '#e2e8f0';
@@ -201,19 +178,16 @@ export default function Login() {
               </div>
             </div>
 
-            <div style={{ marginBottom: 22 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <label style={{
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: '#334155',
-                }}>
-                  Password
-                </label>
-                <span style={{ fontSize: 12, color: '#059669', fontWeight: 600, cursor: 'default' }}>
-                  Secure RBAC Login
-                </span>
-              </div>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{
+                display: 'block',
+                fontSize: 13,
+                fontWeight: 600,
+                color: '#334155',
+                marginBottom: 6,
+              }}>
+                Password
+              </label>
               <div style={{ position: 'relative' }}>
                 <Lock size={16} style={{
                   position: 'absolute',
@@ -231,7 +205,7 @@ export default function Login() {
                   style={{
                     width: '100%',
                     padding: '11px 40px 11px 40px',
-                    borderRadius: 12,
+                    borderRadius: 10,
                     border: '1.5px solid #e2e8f0',
                     fontSize: 14,
                     color: '#0f172a',
@@ -243,7 +217,7 @@ export default function Login() {
                   onFocus={(e) => {
                     e.target.style.borderColor = '#059669';
                     e.target.style.background = '#ffffff';
-                    e.target.style.boxShadow = '0 0 0 4px rgba(5, 150, 105, 0.12)';
+                    e.target.style.boxShadow = '0 0 0 3px rgba(5, 150, 105, 0.12)';
                   }}
                   onBlur={(e) => {
                     e.target.style.borderColor = '#e2e8f0';
@@ -277,7 +251,7 @@ export default function Login() {
               style={{
                 width: '100%',
                 padding: '12px 20px',
-                borderRadius: 12,
+                borderRadius: 10,
                 background: 'linear-gradient(135deg, #059669, #047857)',
                 color: '#ffffff',
                 border: 'none',
@@ -288,7 +262,7 @@ export default function Login() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 8,
-                boxShadow: '0 8px 20px rgba(5, 150, 105, 0.28)',
+                boxShadow: '0 8px 18px rgba(5, 150, 105, 0.25)',
                 transition: 'all 0.18s ease',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
@@ -297,7 +271,7 @@ export default function Login() {
               {submitting ? (
                 <>
                   <span className="spinner" style={{ width: 16, height: 16 }} />
-                  <span>Authenticating...</span>
+                  <span>Signing In...</span>
                 </>
               ) : (
                 <>
@@ -307,145 +281,6 @@ export default function Login() {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Logins Section */}
-          <div style={{ marginTop: 28, paddingTop: 24, borderTop: '1px solid #f1f5f9' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-              marginBottom: 12,
-              fontSize: 12,
-              fontWeight: 700,
-              color: '#64748b',
-              textTransform: 'uppercase',
-              letterSpacing: 0.6,
-            }}>
-              <Sparkles size={13} color="#059669" />
-              <span>1-Click Test Accounts</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {/* Admin Button */}
-              <button
-                type="button"
-                onClick={() => setDemoAccount('admin@passary.com', 'admin123')}
-                disabled={submitting}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '9px 12px',
-                  borderRadius: 10,
-                  border: '1.5px solid #d1fae5',
-                  background: '#ecfdf5',
-                  color: '#065f46',
-                  fontSize: 12.5,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.15s ease',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#d1fae5'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = '#ecfdf5'; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ShieldCheck size={16} color="#059669" />
-                  <div>
-                    <div style={{ fontWeight: 800 }}>Super Admin</div>
-                    <div style={{ fontSize: 11, color: '#047857', fontWeight: 500 }}>All 9 Pages Full Access + User Management</div>
-                  </div>
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 800, background: '#059669', color: '#fff', padding: '2px 8px', borderRadius: 6 }}>
-                  Try
-                </span>
-              </button>
-
-              {/* Manager Button */}
-              <button
-                type="button"
-                onClick={() => setDemoAccount('manager@passary.com', 'manager123')}
-                disabled={submitting}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '9px 12px',
-                  borderRadius: 10,
-                  border: '1.5px solid #dbeafe',
-                  background: '#eff6ff',
-                  color: '#1e40af',
-                  fontSize: 12.5,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.15s ease',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#dbeafe'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = '#eff6ff'; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <UserCheck size={16} color="#2563eb" />
-                  <div>
-                    <div style={{ fontWeight: 800 }}>Operations Manager</div>
-                    <div style={{ fontSize: 11, color: '#1d4ed8', fontWeight: 500 }}>Repairs/Claims (Full) • Purchase (View) • Finance (None)</div>
-                  </div>
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 800, background: '#2563eb', color: '#fff', padding: '2px 8px', borderRadius: 6 }}>
-                  Try
-                </span>
-              </button>
-
-              {/* Viewer Button */}
-              <button
-                type="button"
-                onClick={() => setDemoAccount('viewer@passary.com', 'viewer123')}
-                disabled={submitting}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '9px 12px',
-                  borderRadius: 10,
-                  border: '1.5px solid #fef3c7',
-                  background: '#fffbeb',
-                  color: '#92400e',
-                  fontSize: 12.5,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.15s ease',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#fef3c7'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = '#fffbeb'; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Eye size={16} color="#d97706" />
-                  <div>
-                    <div style={{ fontWeight: 800 }}>Audit & Staff Viewer</div>
-                    <div style={{ fontSize: 11, color: '#b45309', fontWeight: 500 }}>Read-Only View on all modules (No Edit/Delete)</div>
-                  </div>
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 800, background: '#d97706', color: '#fff', padding: '2px 8px', borderRadius: 6 }}>
-                  Try
-                </span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer info */}
-        <div style={{
-          background: '#f8fafc',
-          padding: '12px 24px',
-          borderTop: '1px solid #f1f5f9',
-          textAlign: 'center',
-          fontSize: 12,
-          color: '#94a3b8',
-          fontWeight: 600,
-        }}>
-          Passary Minerals Pvt. Ltd. • Secure Fleet Enterprise Access
         </div>
       </div>
     </div>

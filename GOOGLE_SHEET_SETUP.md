@@ -53,12 +53,44 @@ VITE_PAYMENT_FORM_URL=https://docs.google.com/forms/d/YOUR_FORM_ID/viewform
 ---
 
 ## 📑 Automatic Sheet Tables Created
-The script will automatically create and style all 8 sheets on the first request:
-1. `Purchase_Car`
-2. `Insurance`
-3. `Car_Repair`
-4. `Accident_Claims`
+The script connects to all sheets dynamically:
+1. `FMS` / `Car_Repair`
+2. `Purchase Car Details` / `Purchase_Car`
+3. `Insurance Of Vehicle` / `Insurance`
+4. `If Accident / Insurance Claims`
 5. `Vendor_Offers`
-6. `Delivery_Planning`
-7. `Delivery_Car`
-8. `Payment`
+6. `Delivery_Planning` / `Delivery_Car`
+7. `Payment`
+8. `Challan Details`
+9. `Fastag Details`
+10. `Login Page` (User Accounts & Step-wise Permissions)
+
+---
+
+## 🔐 "Login Page" Sheet Columns Specification
+Aapke Google Sheet ke **"Login Page"** tab me ye columns live sync hote hain:
+
+| Col | Header Name | Description | Example Values |
+|---|---|---|---|
+| A | `Timestamp` | Created time | `9/15/2026 12:00:00` |
+| B | `Name` | User ka full name | `Ramesh Sharma` |
+| C | `User` | Login email / username | `ramesh@passary.com` |
+| D | `Password` | Login password | `pass123` |
+| E | `Role` | User role | `Admin` ya `User` |
+| F | `Department` | Department name | `Operations`, `Finance`, etc. |
+| G | `Dashboard` | Dashboard access | `Full`, `View`, ya `None` |
+| H | `Purchase Car` | Purchase Car access | `Full`, `View`, ya `None` |
+| I | `Challan` | Challan access | `Full`, `View`, ya `None` |
+| J | `Fastag` | Fastag access | `Full`, `View`, ya `None` |
+| K | `Insurance` | Insurance access | `Full`, `View`, ya `None` |
+| L | `Car Repair` | Car Repair access | `Full`, `View`, ya `None` |
+| M | `Accident / Claims` | Claims access | `Full`, `View`, ya `None` |
+| N | `Vendor Offers` | Vendor Offers access | `Full`, `View`, ya `None` |
+| O | `Approvals` | Approvals access | `Full`, `View`, ya `None` |
+| P | `Delivery Of Car` | Delivery access | `Full`, `View`, ya `None` |
+| Q | `Payment` | Payment access | `Full`, `View`, ya `None` |
+
+> 💡 **2-Way Sync:**
+> - **Sheet -> React:** Google Sheet me user add karein, password badle, ya kisi column me `Full` / `View` / `None` badle, React me bina refresh kiye automatic update ho jayega!
+> - **React -> Sheet:** User Management page me user banayein ya edit karein, wo turant Google Sheet me row add/update ho jayegi!
+
