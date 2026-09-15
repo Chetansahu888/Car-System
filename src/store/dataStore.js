@@ -1877,8 +1877,17 @@ export const deleteUserFromSheet = async (userEmail) => {
 };
 
 export const syncUsersFromSheet = async () => {
-  const remote = await fetchFromSheet('get_LoginPage', 'Login Page');
-  if (Array.isArray(remote) && remote.length > 0) {
+  let remote = await fetchFromSheet('get_LoginPage', 'Login Page');
+  if (!remote || !Array.isArray(remote) || remote.length === 0) {
+    const all = await fetchFromSheet('getAll');
+    if (all && typeof all === 'object') {
+      const loginKey = Object.keys(all).find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes('login'));
+      if (loginKey && Array.isArray(all[loginKey])) {
+        remote = all[loginKey];
+      }
+    }
+  }
+  if (Array.isArray(remote)) {
     const mapped = remote.map(mapSheetRowToUser).filter(Boolean);
     if (mapped.length > 0) {
       localStorage.setItem(KEYS.USERS, JSON.stringify(mapped));

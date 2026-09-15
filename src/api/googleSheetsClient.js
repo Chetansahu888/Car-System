@@ -1,16 +1,23 @@
 // api/googleSheetsClient.js
 
+const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbycTpVc1YXrUEaKOgle08gyXPH1NJqo-GBiLfqGs9XM3hq2FK_jpzm8JTS9s5FeMisP/exec';
+
 export const getScriptUrl = () => {
-  const envUrl = import.meta.env.VITE_SCRIPT_URL;
-  const customUrl = localStorage.getItem('cms_script_url');
-  
-  if (customUrl && customUrl.trim().startsWith('http')) {
-    return customUrl.trim();
-  }
-  if (envUrl && envUrl.trim().startsWith('http') && !envUrl.includes('YOUR_GOOGLE_APPS_SCRIPT_URL')) {
-    return envUrl.trim();
-  }
-  return null;
+  try {
+    const customUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('cms_script_url') : null;
+    if (customUrl && customUrl.trim().startsWith('http') && customUrl.includes('script.google.com')) {
+      return customUrl.trim();
+    }
+  } catch (e) {}
+
+  try {
+    const envUrl = import.meta.env?.VITE_SCRIPT_URL;
+    if (envUrl && envUrl.trim().startsWith('http') && !envUrl.includes('YOUR_GOOGLE_APPS_SCRIPT_URL')) {
+      return envUrl.trim();
+    }
+  } catch (e) {}
+
+  return DEFAULT_SCRIPT_URL;
 };
 
 export const setScriptUrl = (url) => {
@@ -71,7 +78,7 @@ export const fetchFromSheet = async (action = 'getAll', sheetName = null) => {
   if (!url) return null;
   try {
     const query = sheetName ? `sheet=${encodeURIComponent(sheetName)}` : `action=${encodeURIComponent(action)}`;
-    const res = await fetch(`${url}?${query}&_t=${Date.now()}`, { mode: 'cors' });
+    const res = await fetch(`${url}?${query}&_t=${Date.now()}`, { redirect: 'follow' });
     const json = await res.json();
     if (json.status === 'success') {
       return json.data;

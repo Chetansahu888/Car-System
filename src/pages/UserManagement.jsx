@@ -1,6 +1,7 @@
 // pages/UserManagement.jsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth, PAGE_CONFIG, ACCESS_LEVELS } from '../context/AuthContext';
+import { syncAllFromSheets } from '../store/dataStore';
 import {
   Users, UserPlus, Shield, Key, Edit2, Trash2, CheckCircle2,
   XCircle, Eye, ShieldCheck, Lock, Search, Filter, AlertTriangle, UserCheck,
@@ -42,12 +43,20 @@ export default function UserManagement() {
   const [deleteDialog, setDeleteDialog] = useState(null);
   const [syncingSheet, setSyncingSheet] = useState(false);
 
+  useEffect(() => {
+    syncWithSheetNow().catch(() => {});
+    syncAllFromSheets(true).catch(() => {});
+  }, []);
+
   const handleSyncSheet = async () => {
     setSyncingSheet(true);
     try {
-      const res = await syncWithSheetNow();
+      const [res] = await Promise.all([
+        syncWithSheetNow(),
+        syncAllFromSheets(true)
+      ]);
       if (res && res.length > 0) {
-        toast.success(`Successfully synced ${res.length} users from Google Sheet!`);
+        toast.success(`Successfully synced ${res.length} user(s) from Google Sheet!`);
       } else {
         toast.error('Could not fetch from sheet or "Login Page" is empty.');
       }
