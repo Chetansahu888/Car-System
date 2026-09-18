@@ -40,9 +40,25 @@ const FORM_RULES = {
 };
 
 const EMPTY_INSURANCE = {
-  date: today(),
+  date: '',
   nameOfCompany: '',
   agentName: '',
+  hasOwnDamage: 'Yes',
+  odStartDate: '',
+  odEndDate: '',
+  hasThirdParty: 'Yes',
+  tpPolicyNo: '',
+  tpStartDate: '',
+  tpEndDate: '',
+  tppdLimit: '750000',
+  hasPaCover: 'Yes',
+  paCoverType: 'Owner-Driver CPA (₹15 Lakhs)',
+  paSumInsured: '1500000',
+  paPremium: '',
+  paStartDate: '',
+  paEndDate: '',
+  paNomineeName: '',
+  paNomineeRelation: '',
   idvValue: '',
   totalPremiumToBePaid: '',
   basicPremium: '',
@@ -115,9 +131,25 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
           if (existing) {
             setHasInsurance(true);
             setInsForm({
-              date: existing.date || car?.dateOfInsurance || today(),
+              date: existing.date || car?.dateOfInsurance || '',
               nameOfCompany: existing.nameOfCompany || car?.nameOfCompany || '',
               agentName: existing.agentName || car?.agentName || '',
+              hasOwnDamage: existing.hasOwnDamage || (existing.basicPremium ? 'Yes' : 'No'),
+              odStartDate: existing.odStartDate || existing.date || '',
+              odEndDate: existing.odEndDate || '',
+              hasThirdParty: existing.hasThirdParty || (existing.thirdPartyPremium ? 'Yes' : 'No'),
+              tpPolicyNo: existing.tpPolicyNo || '',
+              tpStartDate: existing.tpStartDate || existing.date || '',
+              tpEndDate: existing.tpEndDate || '',
+              tppdLimit: existing.tppdLimit || '750000',
+              hasPaCover: existing.hasPaCover || (existing.paPremium ? 'Yes' : 'No'),
+              paCoverType: existing.paCoverType || 'Owner-Driver CPA (₹15 Lakhs)',
+              paSumInsured: existing.paSumInsured || '1500000',
+              paPremium: existing.paPremium || '',
+              paStartDate: existing.paStartDate || existing.date || '',
+              paEndDate: existing.paEndDate || '',
+              paNomineeName: existing.paNomineeName || '',
+              paNomineeRelation: existing.paNomineeRelation || '',
               idvValue: existing.idvValue || '',
               totalPremiumToBePaid: existing.totalPremiumToBePaid || '',
               basicPremium: existing.basicPremium || '',
@@ -167,6 +199,56 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
         if (!isNaN(emi) && emi > 0 && !isNaN(count) && count > 0) {
           updated.paidEmiAmount = String(count * emi);
         }
+      }
+      return updated;
+    });
+  };
+
+  const updateIns = (field, value) => {
+    setInsForm(f => {
+      const updated = { ...f, [field]: value };
+      const isCalcField = [
+        'basicPremium', 'addOnPremium', 'premiumOfNcb',
+        'thirdPartyPremium', 'paPremium',
+        'hasOwnDamage', 'hasThirdParty', 'hasPaCover'
+      ].includes(field);
+
+      if (isCalcField) {
+        const od = updated.hasOwnDamage === 'Yes' ? (Number(updated.basicPremium) || 0) : 0;
+        const addOn = updated.hasOwnDamage === 'Yes' ? (Number(updated.addOnPremium) || 0) : 0;
+        const ncb = updated.hasOwnDamage === 'Yes' ? (Number(updated.premiumOfNcb) || 0) : 0;
+        const tp = updated.hasThirdParty === 'Yes' ? (Number(updated.thirdPartyPremium) || 0) : 0;
+        const pa = updated.hasPaCover === 'Yes' ? (Number(updated.paPremium) || 0) : 0;
+
+        const net = Math.max(0, od + addOn - ncb) + tp + pa;
+        if (net > 0) {
+          const gst = Math.round(net * 0.18);
+          const total = net + gst;
+          updated.taxAmount = String(gst);
+          updated.totalPremiumAmount = String(total);
+          updated.totalPremiumToBePaid = String(total);
+          set('insuranceAmount', String(total));
+        } else {
+          updated.taxAmount = '0';
+          updated.totalPremiumAmount = '0';
+          updated.totalPremiumToBePaid = '0';
+          set('insuranceAmount', '0');
+        }
+      } else if (field === 'taxAmount') {
+        const od = updated.hasOwnDamage === 'Yes' ? (Number(updated.basicPremium) || 0) : 0;
+        const addOn = updated.hasOwnDamage === 'Yes' ? (Number(updated.addOnPremium) || 0) : 0;
+        const ncb = updated.hasOwnDamage === 'Yes' ? (Number(updated.premiumOfNcb) || 0) : 0;
+        const tp = updated.hasThirdParty === 'Yes' ? (Number(updated.thirdPartyPremium) || 0) : 0;
+        const pa = updated.hasPaCover === 'Yes' ? (Number(updated.paPremium) || 0) : 0;
+        const net = Math.max(0, od + addOn - ncb) + tp + pa;
+        const gst = Number(value) || 0;
+        const total = net + gst;
+        updated.totalPremiumAmount = String(total);
+        updated.totalPremiumToBePaid = String(total);
+        set('insuranceAmount', String(total));
+      } else if (field === 'totalPremiumAmount') {
+        updated.totalPremiumToBePaid = value;
+        set('insuranceAmount', value);
       }
       return updated;
     });
@@ -639,96 +721,360 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
               </FormField>
             </div>
 
-            {/* Premium Breakdown */}
-            <div className="form-section-header" style={{ marginBottom: 14 }}>
-              <div className="form-section-icon"><CreditCard size={18} strokeWidth={2.2} /></div>
-              <div className="form-section-title">Premium Breakdown</div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14, marginBottom: 24 }}>
-              {[
-                ['IDV Value (₹)', 'idvValue'],
-                ['Total Premium (₹)', 'totalPremiumToBePaid'],
-                ['Basic Premium (₹)', 'basicPremium'],
-                ['3rd Party Premium (₹)', 'thirdPartyPremium'],
-                ['Add-On Premium (₹)', 'addOnPremium'],
-                ['Tax Amount (₹)', 'taxAmount'],
-                ['Total Premium Amount (₹)', 'totalPremiumAmount'],
-                ['NCB Premium (₹)', 'premiumOfNcb']
-              ].map(([label, field]) => (
-                <FormField key={field} label={label}>
-                  <input
-                    type="number"
-                    className="form-input"
-                    value={insForm[field]}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setInsForm(f => ({ ...f, [field]: val }));
-                      if (field === 'totalPremiumAmount' || field === 'totalPremiumToBePaid') {
-                        set('insuranceAmount', val);
-                      }
-                    }}
-                    placeholder="0"
-                  />
-                </FormField>
-              ))}
-            </div>
-
-            {/* Add-On Covers Included */}
-            <div className="form-section-header" style={{ marginBottom: 14 }}>
+            {/* Coverage Selection Dropdowns */}
+            <div className="form-section-header">
               <div className="form-section-icon"><ShieldCheck size={18} strokeWidth={2.2} /></div>
-              <div className="form-section-title">Add-On Covers Included</div>
+              <div className="form-section-title">Insurance Coverage Selection</div>
             </div>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-              gap: 14,
-              marginBottom: 24,
-              padding: '16px',
-              background: '#ffffff',
-              borderRadius: 12,
-              border: '1px solid #e2e8f0'
-            }}>
-              {[
-                ['Depreciation Reimbursement', 'depreciationReimbursement'],
-                ['Engine Secure', 'engineSecure'],
-                ['Consumable Expenses', 'consumableExpenses'],
-                ['Loss of Personal Belonging', 'personalBelonging'],
-                ['Roadside Assistance', 'roadsideAssistance'],
-                ['Key Replacement', 'keyReplacement'],
-                ['Emergency Transport & Hotel', 'emergencyTransportHotel'],
-              ].map(([label, field]) => (
-                <CheckField
-                  key={field}
-                  label={label}
-                  checked={insForm[field]}
-                  onChange={() => setInsForm(f => ({ ...f, [field]: !f[field] }))}
-                />
-              ))}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
+              <FormField label="Own Damage / Self Accident">
+                <select
+                  className="form-select"
+                  value={insForm.hasOwnDamage}
+                  onChange={e => updateIns('hasOwnDamage', e.target.value)}
+                >
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </FormField>
+
+              <FormField label="Third Party (TP) Insurance">
+                <select
+                  className="form-select"
+                  value={insForm.hasThirdParty}
+                  onChange={e => updateIns('hasThirdParty', e.target.value)}
+                >
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </FormField>
+
+              <FormField label="Personal Accident (PA Cover)">
+                <select
+                  className="form-select"
+                  value={insForm.hasPaCover}
+                  onChange={e => updateIns('hasPaCover', e.target.value)}
+                >
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </FormField>
             </div>
 
-            {/* Policy Terms & NCB */}
-            <div className="form-section-header" style={{ marginBottom: 14 }}>
-              <div className="form-section-icon"><Shield size={18} strokeWidth={2.2} /></div>
-              <div className="form-section-title">Policy Terms & NCB</div>
+            {/* 1. Own Damage / Self Accident Form (When YES) */}
+            {insForm.hasOwnDamage === 'Yes' && (
+              <>
+                <div className="form-section-header">
+                  <div className="form-section-icon"><Car size={18} strokeWidth={2.2} /></div>
+                  <div className="form-section-title">Own Damage / Self Accident Details</div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 20 }}>
+                  <FormField label="OD Policy Start Date">
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={insForm.odStartDate || ''}
+                      onChange={e => {
+                        const sDate = e.target.value;
+                        const ren = sDate ? calcInsuranceRenewal(sDate) : null;
+                        updateIns('odStartDate', sDate);
+                        if (ren) updateIns('odEndDate', toInputDate(ren));
+                      }}
+                    />
+                  </FormField>
+                  <FormField label="OD Policy End Date">
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={insForm.odEndDate || ''}
+                      onChange={e => updateIns('odEndDate', e.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="IDV Value (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.idvValue}
+                      onChange={e => updateIns('idvValue', e.target.value)}
+                      placeholder="e.g. 1200000"
+                    />
+                  </FormField>
+                  <FormField label="Own Damage / Basic Premium (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.basicPremium}
+                      onChange={e => updateIns('basicPremium', e.target.value)}
+                      placeholder="0"
+                    />
+                  </FormField>
+                  <FormField label="Claimed Insurance Last Year?">
+                    <select
+                      className="form-select"
+                      value={insForm.claimedLastYear}
+                      onChange={e => updateIns('claimedLastYear', e.target.value)}
+                    >
+                      <option value="No">No</option>
+                      <option value="Yes">Yes</option>
+                    </select>
+                  </FormField>
+                  <FormField label="Policy Inclusive of NCB?">
+                    <select
+                      className="form-select"
+                      value={insForm.policyInclusiveOfNcb}
+                      onChange={e => updateIns('policyInclusiveOfNcb', e.target.value)}
+                    >
+                      <option value="No">No</option>
+                      <option value="Yes">Yes</option>
+                    </select>
+                  </FormField>
+                  <FormField label="NCB Discount Amount (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.premiumOfNcb}
+                      onChange={e => updateIns('premiumOfNcb', e.target.value)}
+                      placeholder="0"
+                    />
+                  </FormField>
+                  <FormField label="Cashless Facility Available?">
+                    <select
+                      className="form-select"
+                      value={insForm.cashlessPolicy}
+                      onChange={e => updateIns('cashlessPolicy', e.target.value)}
+                    >
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </FormField>
+                  <FormField label="Add-On Premium (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.addOnPremium}
+                      onChange={e => updateIns('addOnPremium', e.target.value)}
+                      placeholder="0"
+                    />
+                  </FormField>
+                </div>
+
+                {/* Add-on Covers */}
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#334155', marginBottom: 12 }}>
+                    Add-On Covers Included
+                  </div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+                    gap: 12,
+                    padding: '16px',
+                    background: '#ffffff',
+                    borderRadius: 12,
+                    border: '1px solid #e2e8f0'
+                  }}>
+                    {[
+                      ['Depreciation Reimbursement (Zero Dep)', 'depreciationReimbursement'],
+                      ['Engine Secure', 'engineSecure'],
+                      ['Consumable Expenses', 'consumableExpenses'],
+                      ['Loss of Personal Belonging', 'personalBelonging'],
+                      ['Roadside Assistance (RSA)', 'roadsideAssistance'],
+                      ['Key Replacement', 'keyReplacement'],
+                      ['Emergency Transport & Hotel', 'emergencyTransportHotel'],
+                    ].map(([label, field]) => (
+                      <CheckField
+                        key={field}
+                        label={label}
+                        checked={insForm[field]}
+                        onChange={() => updateIns(field, !insForm[field])}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* 2. Third Party Insurance Form (When YES) */}
+            {insForm.hasThirdParty === 'Yes' && (
+              <>
+                <div className="form-section-header">
+                  <div className="form-section-icon"><Shield size={18} strokeWidth={2.2} /></div>
+                  <div className="form-section-title">Third Party (TP) Insurance Details</div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
+                  <FormField label="TP Policy Start Date">
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={insForm.tpStartDate || ''}
+                      onChange={e => {
+                        const sDate = e.target.value;
+                        const ren = sDate ? calcInsuranceRenewal(sDate) : null;
+                        updateIns('tpStartDate', sDate);
+                        if (ren) updateIns('tpEndDate', toInputDate(ren));
+                      }}
+                    />
+                  </FormField>
+                  <FormField label="TP Policy End Date">
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={insForm.tpEndDate || ''}
+                      onChange={e => updateIns('tpEndDate', e.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="3rd Party Premium (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.thirdPartyPremium}
+                      onChange={e => updateIns('thirdPartyPremium', e.target.value)}
+                      placeholder="0"
+                    />
+                  </FormField>
+                  <FormField label="TP Policy / Certificate No.">
+                    <input
+                      className="form-input"
+                      value={insForm.tpPolicyNo}
+                      onChange={e => updateIns('tpPolicyNo', e.target.value)}
+                      placeholder="Policy / Certificate number"
+                    />
+                  </FormField>
+                  <FormField label="TPPD Coverage Limit (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.tppdLimit}
+                      onChange={e => updateIns('tppdLimit', e.target.value)}
+                      placeholder="750000"
+                    />
+                  </FormField>
+                </div>
+              </>
+            )}
+
+            {/* 3. Personal Accident Cover Form (When YES) */}
+            {insForm.hasPaCover === 'Yes' && (
+              <>
+                <div className="form-section-header">
+                  <div className="form-section-icon"><Clock size={18} strokeWidth={2.2} /></div>
+                  <div className="form-section-title">Personal Accident (PA) Cover Details</div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
+                  <FormField label="PA Cover Type">
+                    <select
+                      className="form-select"
+                      value={insForm.paCoverType}
+                      onChange={e => updateIns('paCoverType', e.target.value)}
+                    >
+                      <option value="Owner-Driver CPA (₹15 Lakhs)">Owner-Driver CPA (₹15 Lakhs)</option>
+                      <option value="Paid Driver Cover">Paid Driver Cover</option>
+                      <option value="Unnamed Passenger Cover">Unnamed Passenger Cover</option>
+                    </select>
+                  </FormField>
+                  <FormField label="PA Sum Insured (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.paSumInsured}
+                      onChange={e => updateIns('paSumInsured', e.target.value)}
+                      placeholder="1500000"
+                    />
+                  </FormField>
+                  <FormField label="PA Premium (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.paPremium}
+                      onChange={e => updateIns('paPremium', e.target.value)}
+                      placeholder="0"
+                    />
+                  </FormField>
+                  <FormField label="PA Start Date">
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={insForm.paStartDate || ''}
+                      onChange={e => {
+                        const sDate = e.target.value;
+                        const ren = sDate ? calcInsuranceRenewal(sDate) : null;
+                        updateIns('paStartDate', sDate);
+                        if (ren) updateIns('paEndDate', toInputDate(ren));
+                      }}
+                    />
+                  </FormField>
+                  <FormField label="PA End Date">
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={insForm.paEndDate || ''}
+                      onChange={e => updateIns('paEndDate', e.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Nominee Name">
+                    <input
+                      className="form-input"
+                      value={insForm.paNomineeName}
+                      onChange={e => updateIns('paNomineeName', e.target.value)}
+                      placeholder="Full name of nominee"
+                    />
+                  </FormField>
+                  <FormField label="Nominee Relationship">
+                    <input
+                      className="form-input"
+                      value={insForm.paNomineeRelation}
+                      onChange={e => updateIns('paNomineeRelation', e.target.value)}
+                      placeholder="e.g. Spouse, Father, Mother"
+                    />
+                  </FormField>
+                </div>
+              </>
+            )}
+
+            {/* Overall Premium Summary & Tax */}
+            <div className="form-section-header">
+              <div className="form-section-icon"><CreditCard size={18} strokeWidth={2.2} /></div>
+              <div className="form-section-title">Total Premium & Taxes Breakdown</div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
-              {[
-                ['Claimed Insurance Last Year?', 'claimedLastYear'],
-                ['Policy Inclusive of NCB?', 'policyInclusiveOfNcb'],
-                ['Cashless Policy?', 'cashlessPolicy'],
-              ].map(([label, field]) => (
-                <FormField key={field} label={label}>
-                  <select
-                    className="form-select"
-                    value={insForm[field]}
-                    onChange={e => setInsForm(f => ({ ...f, [field]: e.target.value }))}
-                  >
-                    <option value="Yes">Yes</option>
-                    <option value="No">No</option>
-                  </select>
-                </FormField>
-              ))}
-            </div>
+            {(() => {
+              const odNet = insForm.hasOwnDamage === 'Yes' ? Math.max(0, (Number(insForm.basicPremium) || 0) + (Number(insForm.addOnPremium) || 0) - (Number(insForm.premiumOfNcb) || 0)) : 0;
+              const tpNet = insForm.hasThirdParty === 'Yes' ? (Number(insForm.thirdPartyPremium) || 0) : 0;
+              const paNet = insForm.hasPaCover === 'Yes' ? (Number(insForm.paPremium) || 0) : 0;
+              const netTotal = odNet + tpNet + paNet;
+
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
+                  <FormField label="Tax / GST (18%) Amount (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.taxAmount}
+                      onChange={e => updateIns('taxAmount', e.target.value)}
+                      placeholder="0"
+                    />
+                    {netTotal > 0 && (
+                      <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 4 }}>
+                        Auto: 18% GST on Net ₹{netTotal.toLocaleString('en-IN')}
+                      </div>
+                    )}
+                  </FormField>
+                  <FormField label="Total Premium Amount (₹)">
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={insForm.totalPremiumAmount || insForm.totalPremiumToBePaid}
+                      onChange={e => updateIns('totalPremiumAmount', e.target.value)}
+                      placeholder="0"
+                      style={{ fontWeight: 800, color: '#059669', fontSize: 16 }}
+                    />
+                    {netTotal > 0 && (
+                      <div style={{ fontSize: 11.5, color: '#059669', fontWeight: 700, marginTop: 4 }}>
+                        Net ₹{netTotal.toLocaleString('en-IN')} + GST ₹{(Number(insForm.taxAmount) || 0).toLocaleString('en-IN')}
+                      </div>
+                    )}
+                  </FormField>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}
