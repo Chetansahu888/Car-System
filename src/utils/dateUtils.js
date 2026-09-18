@@ -133,3 +133,99 @@ export const daysUntil = (date) => {
 };
 
 export const today = () => format(new Date(), 'yyyy-MM-dd');
+
+export const calcEmiDetails = (car) => {
+  if (!car) return null;
+
+  const rawLoan = car.loanAmount ? Number(String(car.loanAmount).replace(/[^0-9.-]+/g, '')) : 0;
+  const rawEmi = car.emiAmount ? Number(String(car.emiAmount).replace(/[^0-9.-]+/g, '')) : 0;
+  const rawCarVal = car.valueOfCar ? Number(String(car.valueOfCar).replace(/[^0-9.-]+/g, '')) : 0;
+
+  const loanAmount = rawLoan > 0 ? rawLoan : (rawCarVal > 0 ? rawCarVal : 0);
+  const emiAmount = rawEmi > 0 ? rawEmi : 0;
+
+  const startDate = car.emiStartDate ? parseAnyDate(car.emiStartDate) : null;
+  const lastDate = car.lastEmiDate ? parseAnyDate(car.lastEmiDate) : null;
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  let totalEmis = car.totalEmis ? Number(car.totalEmis) : 0;
+  if (!totalEmis && startDate && lastDate && lastDate >= startDate) {
+    const diffMonths = (lastDate.getFullYear() - startDate.getFullYear()) * 12 + (lastDate.getMonth() - startDate.getMonth()) + 1;
+    totalEmis = Math.max(1, diffMonths);
+  } else if (!totalEmis && loanAmount > 0 && emiAmount > 0) {
+    totalEmis = Math.round(loanAmount / emiAmount);
+  }
+
+  let nextEmiDate = null;
+  let isCompleted = false;
+
+  if (lastDate && now > lastDate) {
+    isCompleted = true;
+  }
+
+  const payDay = lastDate ? lastDate.getDate() : (startDate ? startDate.getDate() : 10);
+
+  if (!isCompleted && (lastDate || startDate || emiAmount > 0)) {
+    const thisMonthDue = new Date(now.getFullYear(), now.getMonth(), payDay);
+    if (thisMonthDue >= now) {
+      nextEmiDate = thisMonthDue;
+    } else {
+      nextEmiDate = new Date(now.getFullYear(), now.getMonth() + 1, payDay);
+    }
+    if (lastDate && nextEmiDate > lastDate) {
+      nextEmiDate = lastDate;
+    }
+  }
+
+  let paidEmis = car.paidEmis !== undefined && car.paidEmis !== '' ? Number(car.paidEmis) : null;
+  const explicitPaid = (car.paidEmiAmount !== undefined && car.paidEmiAmount !== '')
+    ? Number(String(car.paidEmiAmount).replace(/[^0-9.-]+/g, ''))
+    : ((car.paidAmount !== undefined && car.paidAmount !== '') ? Number(String(car.paidAmount).replace(/[^0-9.-]+/g, '')) : null);
+
+  if (paidEmis === null || isNaN(paidEmis)) {
+    if (explicitPaid !== null && !isNaN(explicitPaid) && emiAmount > 0) {
+      paidEmis = Math.round(explicitPaid / emiAmount);
+    } else if (isCompleted && totalEmis > 0) {
+      paidEmis = totalEmis;
+    } else if (startDate && now >= startDate) {
+      const elapsedMonths = (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth());
+      const passed = now.getDate() >= payDay ? 1 : 0;
+      paidEmis = Math.min(totalEmis > 0 ? totalEmis : 999, Math.max(0, elapsedMonths + passed));
+    } else {
+      paidEmis = 0;
+    }
+  }
+
+  const remainingEmis = totalEmis > 0 ? Math.max(0, totalEmis - paidEmis) : 0;
+  const paidAmount = (explicitPaid !== null && !isNaN(explicitPaid) && explicitPaid >= 0)
+    ? explicitPaid
+    : (emiAmount > 0 ? (paidEmis * emiAmount) : (loanAmount > 0 && totalEmis > 0 ? Math.round((paidEmis / totalEmis) * loanAmount) : 0));
+  const remainingAmount = loanAmount > 0 ? Math.max(0, loanAmount - paidAmount) : (emiAmount > 0 && remainingEmis > 0 ? remainingEmis * emiAmount : 0);
+
+  let daysUntilNextEmi = null;
+  let isOverdue = false;
+  let isDueSoon = false;
+
+  if (nextEmiDate) {
+    daysUntilNextEmi = differenceInDays(nextEmiDate, now);
+    if (daysUntilNextEmi < 0) isOverdue = true;
+    if (daysUntilNextEmi >= 0 && daysUntilNextEmi <= 7) isDueSoon = true;
+  }
+
+  return {
+    loanAmount,
+    emiAmount,
+    totalEmis,
+    paidEmis,
+    remainingEmis,
+    paidAmount,
+    remainingAmount,
+    nextEmiDate,
+    daysUntilNextEmi,
+    isOverdue,
+    isDueSoon,
+    isCompleted,
+    payDay,
+  };
+};

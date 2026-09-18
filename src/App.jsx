@@ -10,6 +10,7 @@ import { AuthProvider, PAGE_KEYS } from './context/AuthContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import PurchaseCar from './pages/PurchaseCar';
+import VehicleOnEmi from './pages/VehicleOnEmi';
 import Challans from './pages/Challans';
 import Fastag from './pages/Fastag';
 import Insurance from './pages/Insurance';
@@ -53,6 +54,26 @@ function AppRoutes() {
           <ProtectedRoute pageKey={PAGE_KEYS.PURCHASE_CAR}>
             <Layout>
               <PurchaseCar />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/vehicle-emi"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.VEHICLE_EMI}>
+            <Layout>
+              <VehicleOnEmi />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/vehicle-on-emi"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.VEHICLE_EMI}>
+            <Layout>
+              <VehicleOnEmi />
             </Layout>
           </ProtectedRoute>
         }

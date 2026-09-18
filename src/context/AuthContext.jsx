@@ -8,6 +8,7 @@ const USERS_STORAGE_KEY = 'cms_users';
 export const PAGE_KEYS = {
   DASHBOARD: 'dashboard',
   PURCHASE_CAR: 'purchase_car',
+  VEHICLE_EMI: 'vehicle_emi',
   CHALLANS: 'challans',
   FASTAG: 'fastag',
   INSURANCE: 'insurance',
@@ -22,6 +23,7 @@ export const PAGE_KEYS = {
 export const PAGE_CONFIG = [
   { key: PAGE_KEYS.DASHBOARD, label: 'Dashboard', path: '/', defaultLevel: 'full' },
   { key: PAGE_KEYS.PURCHASE_CAR, label: 'Purchase Car', path: '/purchase-car', defaultLevel: 'full' },
+  { key: PAGE_KEYS.VEHICLE_EMI, label: 'Vehicle on EMI', path: '/vehicle-emi', defaultLevel: 'full' },
   { key: PAGE_KEYS.CHALLANS, label: 'Challan', path: '/challans', defaultLevel: 'full' },
   { key: PAGE_KEYS.FASTAG, label: 'Fastag', path: '/fastags', defaultLevel: 'full' },
   { key: PAGE_KEYS.INSURANCE, label: 'Insurance', path: '/insurance', defaultLevel: 'full' },
@@ -62,6 +64,7 @@ const DEFAULT_USERS = [
     permissions: {
       [PAGE_KEYS.DASHBOARD]: ACCESS_LEVELS.FULL,
       [PAGE_KEYS.PURCHASE_CAR]: ACCESS_LEVELS.VIEW,
+      [PAGE_KEYS.VEHICLE_EMI]: ACCESS_LEVELS.FULL,
       [PAGE_KEYS.CHALLANS]: ACCESS_LEVELS.FULL,
       [PAGE_KEYS.FASTAG]: ACCESS_LEVELS.FULL,
       [PAGE_KEYS.INSURANCE]: ACCESS_LEVELS.VIEW,

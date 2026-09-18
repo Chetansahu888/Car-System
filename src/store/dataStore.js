@@ -21,6 +21,7 @@ const KEYS = {
 export const PAGE_STEPS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'purchase_car', label: 'Purchase Car' },
+  { key: 'vehicle_emi', label: 'Vehicle on EMI' },
   { key: 'challans', label: 'Challan' },
   { key: 'fastag', label: 'Fastag' },
   { key: 'insurance', label: 'Insurance' },
@@ -79,6 +80,7 @@ export const mapUserToSheet = (user) => {
     "Department": user.department || 'Operations',
     "Dashboard": formatLevel('dashboard'),
     "Purchase Car": formatLevel('purchase_car'),
+    "Vehicle on EMI": formatLevel('vehicle_emi'),
     "Challan": formatLevel('challans'),
     "Fastag": formatLevel('fastag'),
     "Insurance": formatLevel('insurance'),
@@ -182,10 +184,17 @@ export const mapCarToSheet = (car) => ({
   "CHASSIS NO.": car.chassisNo || '',
   "ENGINE NO.": car.engineNo || '',
   "HYPOTHICATION BANK": car.hypothecationBank || '',
+  "LOAN AMOUNT": car.loanAmount || '',
+  "EMI START DATE": car.emiStartDate || '',
   "LAST EMI DATE": car.lastEmiDate || '',
   "DATE OF RELEASE OF HYPOTHICATION": car.dateOfReleaseHypothecation || '',
   "VALUE OF CAR": car.valueOfCar || '',
   "EMI AMOUNT": car.emiAmount || '',
+  "TOTAL EMIS": car.totalEmis || '',
+  "PAID EMIS": car.paidEmis || '',
+  "PAID EMI AMOUNT": car.paidEmiAmount || '',
+  "REMAINING LOAN AMOUNT": car.remainingLoanAmount || '',
+  "EMI (Y/N)": car.hasEmi === false ? 'No' : (car.hasEmi === true ? 'Yes' : (checkHasEmi(car) ? 'Yes' : 'No')),
   "INSURANCE AMOUNT": car.insuranceAmount || '',
   "RTO AMOUNT": car.rtoAmount || '',
   "COMPANY MOBILE NO.": car.companyMobileNo || '',
@@ -233,11 +242,18 @@ export const mapSheetRowToCar = (row, index) => {
     registrationNo: regNo,
     chassisNo: get('CHASSIS NO.', 'CHASSIS NO', 'Chassis No', 'chassisNo'),
     engineNo: get('ENGINE NO.', 'ENGINE NO', 'Engine No', 'engineNo'),
-    hypothecationBank: get('HYPOTHICATION BANK', 'Hypothecation Bank', 'hypothecationBank'),
-    lastEmiDate: get('LAST EMI DATE', 'Last EMI Date', 'lastEmiDate'),
-    dateOfReleaseHypothecation: get('DATE OF RELEASE OF HYPOTHICATION', 'Date of Release of Hypothecation', 'dateOfReleaseHypothecation'),
+    hypothecationBank: get('HYPOTHICATION BANK', 'Hypothecation Bank', 'Hypothication Bank', 'Bank Name', 'hypothecationBank'),
+    loanAmount: get('LOAN AMOUNT', 'Loan Amount', 'loanAmount', 'Total Loan Amount'),
+    emiStartDate: get('EMI START DATE', 'EMI Start Date', 'emiStartDate', 'Loan Start Date'),
+    lastEmiDate: get('LAST EMI DATE', 'Last EMI Date', 'Last Emi Date', 'lastEmiDate'),
+    dateOfReleaseHypothecation: get('DATE OF RELEASE OF HYPOTHICATION', 'Date of Release of Hypothecation', 'Date of Release of Hypothication', 'dateOfReleaseHypothecation'),
     valueOfCar: get('VALUE OF CAR', 'Value of Car', 'valueOfCar'),
-    emiAmount: get('EMI AMOUNT', 'EMI Amount', 'emiAmount'),
+    emiAmount: get('EMI AMOUNT', 'EMI Amount', 'Emi Amount', 'emiAmount', 'EMI'),
+    totalEmis: get('TOTAL EMIS', 'Total EMIs', 'totalEmis', 'Tenure Months', 'Tenure'),
+    paidEmis: get('PAID EMIS', 'Paid EMIs', 'paidEmis', 'EMIs Paid'),
+    paidEmiAmount: get('PAID EMI AMOUNT', 'Paid EMI Amount', 'paidEmiAmount', 'Total EMI Paid Amount', 'Paid Amount'),
+    remainingLoanAmount: get('REMAINING LOAN AMOUNT', 'Remaining Loan Amount', 'remainingLoanAmount', 'Balance Amount', 'Remaining Amount'),
+    emiStatus: get('EMI Status', 'Is EMI', 'EMI (Y/N)', 'Has EMI', 'EMI'),
     insuranceAmount: get('INSURANCE AMOUNT', 'Insurance Amount', 'insuranceAmount'),
     rtoAmount: get('RTO AMOUNT', 'RTO Amount', 'rtoAmount'),
     companyMobileNo: get('COMPANY MOBILE NO.', 'COMPANY MOBILE NO', 'Company Mobile No', 'companyMobileNo'),
@@ -252,6 +268,43 @@ export const mapSheetRowToCar = (row, index) => {
     pollutionDate: get('Pollution Date', 'pollutionDate'),
     timestamp: get('Timestamp', 'timestamp') || createTimestamp(),
   };
+};
+
+export const checkHasEmi = (car) => {
+  if (!car) return false;
+
+  const status = String(car.emiStatus || '').trim().toLowerCase();
+  if (status === 'no' || status === 'false') {
+    const hasOtherEmi = (car.emiAmount && Number(String(car.emiAmount).replace(/[^0-9.-]+/g, '')) > 0) ||
+      (car.hypothecationBank && !['—', '-', 'none', 'no', 'n/a'].includes(String(car.hypothecationBank).trim().toLowerCase()));
+    if (!hasOtherEmi) return false;
+  }
+  if (status === 'yes' || status === 'true') {
+    return true;
+  }
+
+  const isValidVal = (val) => {
+    if (val === undefined || val === null) return false;
+    const s = String(val).trim().toLowerCase();
+    return s !== '' && s !== '0' && s !== '0.00' && s !== '0/-' && s !== '—' && s !== '-' && s !== 'no' && s !== 'none' && s !== 'n/a' && s !== 'nil' && s !== 'null' && s !== 'undefined';
+  };
+
+  if (isValidVal(car.emiAmount)) {
+    const cleaned = String(car.emiAmount).replace(/[^0-9.-]+/g, '');
+    const num = Number(cleaned);
+    if (!isNaN(num) && num > 0) return true;
+    if (isNaN(num) && isValidVal(car.emiAmount)) return true;
+  }
+
+  if (isValidVal(car.hypothecationBank)) {
+    return true;
+  }
+
+  if (isValidVal(car.lastEmiDate)) {
+    return true;
+  }
+
+  return false;
 };
 
 // ─── MAPPER FOR "Insurance Of Vehicle" SHEET ──────────────────────────────────

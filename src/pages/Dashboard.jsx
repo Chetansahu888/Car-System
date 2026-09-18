@@ -9,9 +9,9 @@ import {
 } from 'lucide-react';
 import {
   getCars, getInsurance, getRepairs, getClaims,
-  getVendorOffers, getDeliveries, getPayments, syncAllFromSheets, onStoreUpdate
+  getVendorOffers, getDeliveries, getPayments, syncAllFromSheets, onStoreUpdate, checkHasEmi
 } from '../store/dataStore';
-import { daysUntil, formatDate } from '../utils/dateUtils';
+import { daysUntil, formatDate, calcEmiDetails } from '../utils/dateUtils';
 import Badge from '../components/ui/Badge';
 import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 
@@ -132,9 +132,16 @@ const Dashboard = () => {
   const paymentPending = payments.filter(p => p.paymentStatus === 'Payment Pending').length;
   const paymentCompleted = payments.filter(p => p.paymentStatus === 'Payment Completed').length;
 
+  // ─── 3. EMI Payment Reminders (Due in ≤ 7 Days or Overdue) ───────────────────
+  const emiDueAlerts = cars.filter(c => checkHasEmi(c)).map(c => {
+    const emi = calcEmiDetails(c);
+    return { car: c, emi };
+  }).filter(item => item.emi && !item.emi.isCompleted && (item.emi.isDueSoon || item.emi.isOverdue));
+
   const cards = [
     { icon: Car, label: 'Total Vehicles', value: cars.length, color: '#059669', bgColor: '#ecfdf5', path: '/purchase-car' },
     { icon: Bell, label: 'Delivery Due (≤ 2 Days)', value: deliveryDueAlerts.length, color: '#7c3aed', bgColor: '#f5f3ff', path: '/delivery', alert: deliveryDueAlerts.length > 0, sub: deliveryDueAlerts.length > 0 ? `${deliveryDueAlerts.length} Due Soon` : 'On Schedule' },
+    { icon: Clock, label: 'EMI Due (≤ 7 Days)', value: emiDueAlerts.length, color: '#0d9488', bgColor: '#ccfbf1', path: '/vehicle-emi', alert: emiDueAlerts.length > 0, sub: emiDueAlerts.length > 0 ? `${emiDueAlerts.length} Due Soon` : 'Up to Date' },
     { icon: Shield, label: 'Insurance Active', value: totalInsuranceActive, color: '#16a34a', bgColor: '#dcfce7', path: '/insurance' },
     { icon: Clock, label: '7-Day Renewal Due', value: renewalDue7Days, color: '#d97706', bgColor: '#fef3c7', path: '/insurance', alert: renewalDue7Days > 0 },
     { icon: XCircle, label: 'Insurance Not Available', value: insuranceNotAvailable, color: '#dc2626', bgColor: '#fee2e2', path: '/insurance', alert: insuranceNotAvailable > 0 },
@@ -227,6 +234,11 @@ const Dashboard = () => {
           {renewalDue7Days > 0 && (
             <AlertBanner icon={Clock} type="warning">
               <strong>{renewalDue7Days} vehicle(s)</strong> are within the <strong>7-Day Renewal Window</strong> — <button onClick={() => navigate('/insurance')} style={{ background: 'none', border: 'none', color: '#92400e', textDecoration: 'underline', cursor: 'pointer', fontWeight: 700 }}>Update Renewal Now</button>
+            </AlertBanner>
+          )}
+          {emiDueAlerts.length > 0 && (
+            <AlertBanner icon={Bell} type="warning">
+              <strong>{emiDueAlerts.length} vehicle EMI payment{emiDueAlerts.length > 1 ? 's' : ''}</strong> due in ≤ 7 days or overdue — <button onClick={() => navigate('/vehicle-emi')} style={{ background: 'none', border: 'none', color: '#92400e', textDecoration: 'underline', cursor: 'pointer', fontWeight: 700 }}>Review EMI Schedule</button>
             </AlertBanner>
           )}
           {insuranceExpired > 0 && (
@@ -342,6 +354,58 @@ const Dashboard = () => {
                      isWeek ? <Badge label={`Due in ${days}d`} variant="warning" /> :
                      days <= 30 ? <Badge label={`${days}d left`} variant="warning" /> :
                      <Badge label="Active" variant="success" />}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* EMI Reminders Card */}
+        <div className="section-card" style={{ border: emiDueAlerts.length > 0 ? '1.5px solid #a7f3d0' : '1px solid #e2f0e7' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <Clock size={18} color="#059669" /> EMI Payment Reminders
+            </span>
+            <button className="btn btn-outline btn-xs" onClick={() => navigate('/vehicle-emi')}>
+              View Vehicles <ChevronRight size={12} />
+            </button>
+          </div>
+
+          {emiDueAlerts.length === 0 ? (
+            <div style={{ fontSize: 13, color: '#94a3b8', textAlign: 'center', padding: '32px 0' }}>
+              ✓ All vehicle EMI installments are up to date! No payments due in 7 days.
+            </div>
+          ) : (
+            emiDueAlerts.map(({ car, emi }) => {
+              const days = emi.daysUntilNextEmi;
+              const badgeVariant = emi.isOverdue ? 'danger' : (days === 0 ? 'danger' : (days <= 3 ? 'warning' : 'info'));
+              const badgeText = emi.isOverdue ? `Overdue by ${Math.abs(days)}d` : (days === 0 ? 'Due Today!' : `Due in ${days}d`);
+              const emiAmountFormatted = emi.emiAmount > 0 ? `₹${emi.emiAmount.toLocaleString('en-IN')}` : (car.emiAmount || '—');
+
+              return (
+                <div key={car.vehicleId} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '12px 0', borderBottom: '1px solid #f1f5f9'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#059669', fontSize: 13 }}>{car.vehicleId}</span>
+                      <span style={{ fontWeight: 700, color: '#0f172a', fontSize: 13.5 }}>{car.carName}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                      EMI: <strong>{emiAmountFormatted}</strong> | Bank: <strong>{car.hypothecationBank || '—'}</strong> | Due: <strong>{formatDate(emi.nextEmiDate)}</strong>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Badge label={badgeText} variant={badgeVariant} />
+                    <button
+                      className="btn btn-primary btn-xs"
+                      onClick={() => navigate('/vehicle-emi')}
+                      style={{ padding: '4px 8px', fontSize: 11.5, fontWeight: 700 }}
+                    >
+                      View
+                    </button>
                   </div>
                 </div>
               );

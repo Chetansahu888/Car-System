@@ -3,12 +3,12 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Car, Shield, Wrench, AlertTriangle,
   Store, CheckCircle, Truck, CreditCard, FileWarning,
-  ChevronLeft, ChevronRight, X, Users, Lock, Eye
+  ChevronLeft, ChevronRight, X, Users, Lock, Eye, Clock
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import {
   getRepairs, getVendorOffers, getClaims, getDeliveries,
-  getPayments, getCars, getChallans, getFastags, onStoreUpdate
+  getPayments, getCars, getChallans, getFastags, onStoreUpdate, checkHasEmi
 } from '../../store/dataStore';
 import { useAuth, PAGE_KEYS, ACCESS_LEVELS } from '../../context/AuthContext';
 
@@ -23,6 +23,7 @@ const NAV_GROUPS = [
     section: 'Vehicles',
     items: [
       { to: '/purchase-car', label: 'Purchase Car', icon: Car, pageKey: PAGE_KEYS.PURCHASE_CAR },
+      { to: '/vehicle-emi', label: 'Vehicle on EMI', icon: Clock, badgeKey: 'activeEmis', pageKey: PAGE_KEYS.VEHICLE_EMI },
       { to: '/challans', label: 'Challan', icon: AlertTriangle, badgeKey: 'challans', pageKey: PAGE_KEYS.CHALLANS },
       { to: '/fastags', label: 'Fastag', icon: CreditCard, badgeKey: 'fastag', pageKey: PAGE_KEYS.FASTAG },
     ],
@@ -68,6 +69,8 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
           return !hasFt;
         }).length;
 
+        const activeEmiCount = cars.filter(c => checkHasEmi(c)).length;
+
         setCounts({
           repairs: repairs.filter(r => r.repairStatus !== 'Payment Completed').length,
           offers: offers.filter(o => o.approvalStatus === 'Pending').length,
@@ -77,6 +80,7 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
           payments: payments.filter(p => p.paymentStatus === 'Payment Pending').length,
           challans: challans.filter(c => c.paymentStatus === 'Pending').length,
           fastag: missingFastagCount > 0 ? missingFastagCount : undefined,
+          activeEmis: activeEmiCount > 0 ? activeEmiCount : undefined,
         });
       } catch {
         // silent fallback
