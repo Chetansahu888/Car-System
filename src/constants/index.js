@@ -49,6 +49,8 @@ export const DELIVERY_STATUS = {
 
 export const SURVEY_STATUS = ['Pending', 'Scheduled', 'Completed'];
 
+export const CLAIM_TYPES = ['Own Damage', 'Third Party', 'Total Loss', 'Theft', 'Windshield', 'Other'];
+
 export const TYPES_OF_REPAIR = [
   'Denting',
   'Painting',

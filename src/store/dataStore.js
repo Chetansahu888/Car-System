@@ -2,7 +2,8 @@
 // Dual-layer data store: Synchronous local state + background sync to connected Google Sheets API.
 
 import { getScriptUrl, fetchFromSheet, sendToSheet } from '../api/googleSheetsClient';
-import { createTimestamp } from '../utils/dateUtils';
+import { createTimestamp, today } from '../utils/dateUtils';
+import { generateClaimNo, generateId } from '../utils/idGenerator';
 
 const KEYS = {
   CARS: 'cms_cars',
@@ -521,7 +522,8 @@ export const mapSheetRowToClaim = (row, index) => {
     policyNo: get('Policy No.', 'Policy No', 'policyNo'),
     policyValidity: get('Policy Validity', 'policyValidity'),
     insuranceClaim: get('Insurance Claim', 'insuranceClaim') || 'Yes',
-    estimatedClaimAmount: get('Estimated Claim Amount', 'estimatedClaimAmount'),
+    estimatedClaimAmount: get('Est. Amount', 'Estimated Claim Amount', 'estimatedClaimAmount'),
+    typeOfClaim: get('Type Of Claim', 'typeOfClaim') || 'Own Damage',
     accidentPhotos: get('Accident Photos', 'accidentPhotos'),
     firRequired: get('FIR Required', 'firRequired') || 'No',
     firCopy: get('FIR Copy', 'firCopy'),
@@ -532,12 +534,15 @@ export const mapSheetRowToClaim = (row, index) => {
     surveyorName: get('Surveyor Name', 'surveyorName'),
     surveyorMobileNo: get('Surveyor Mobile No.', 'surveyorMobileNo'),
     surveyDate: get('Survey Date', 'surveyDate'),
-    surveyStatus: get('Survey Status', 'surveyStatus') || 'Completed',
+    surveyStatus: get('Survey', 'Survey Status', 'surveyStatus') || 'Pending',
     claimStatus: get('Claim Status', 'claimStatus') || 'Claim Under Process',
     claimApprovedAmount: get('Claim Approved Amount', 'claimApprovedAmount'),
     claimRejectedReason: get('Claim Rejected Reason', 'claimRejectedReason'),
     claimSettlementDate: get('Claim Settlement Date', 'claimSettlementDate'),
     remarks: get('Remarks', 'remarks'),
+    planned: get('Planned', 'planned'),
+    actual: get('Actual', 'actual'),
+    delay: get('Delay', 'delay'),
     createdAt: get('Timestamp', 'createdAt') || createTimestamp(),
   };
 };
@@ -1027,6 +1032,11 @@ export const syncAllFromSheets = async (silent = false) => {
         }
       }
 
+      // Ensure any repair with insuranceToBeClaimed === 'Yes' has its claim created and synced
+      try {
+        await syncPendingRepairClaims();
+      } catch (e) {}
+
       if (changed) {
         notifyStoreUpdate();
       }
@@ -1221,6 +1231,160 @@ export const getRepairs = async () => {
   return load(KEYS.REPAIRS);
 };
 
+// Maps a claim record to the exact "If Accident / Insurance Claims" sheet headers (Row 6, Col A:K).
+// Col L (Planned) & Col N (Delay) are formula-driven and must never be sent from here.
+export const claimToSheetRow = (item) => ({
+  'Claim No.': item.claimNo || '',
+  'Repair No.': item.repairNo || '',
+  'Vehicle ID': item.vehicleId || '',
+  'Car Name': item.vehicleName || item.carName || '',
+  'Date of Accident': item.dateOfAccident || '',
+  'Insurance Company': item.insuranceCompany || '',
+  'Est. Amount': item.estimatedClaimAmount || '',
+  'Type Of Claim': item.typeOfClaim || 'Own Damage',
+  'Survey': item.surveyStatus || 'Pending',
+  'Claim Status': item.claimStatus || 'Claim Under Process',
+});
+
+// ─── AUTOMATICALLY SYNC REPAIR WITH ACCIDENT CLAIM ───────────────────────────
+export const autoSyncRepairClaim = async (repairItem) => {
+  if (!repairItem || (repairItem.insuranceToBeClaimed !== 'Yes' && repairItem.insuranceClaimed !== 'Yes')) {
+    return null;
+  }
+  
+  const allClaims = load(KEYS.CLAIMS);
+  const existingClaim = allClaims.find(c => c.repairNo && c.repairNo === repairItem.repairNo);
+  const now = createTimestamp();
+
+  // Try to lookup vehicle insurance if insuranceCompany not provided
+  let insCompany = repairItem.insuranceCompany || '';
+  let polNo = repairItem.policyNo || '';
+  let polVal = repairItem.policyValidity || '';
+
+  if (!insCompany) {
+    try {
+      const allIns = load(KEYS.INSURANCE);
+      const matched = allIns.find(i => 
+        (repairItem.vehicleId && i.vehicleId === repairItem.vehicleId) || 
+        (repairItem.carName && i.carName && i.carName.toLowerCase() === repairItem.carName.toLowerCase())
+      );
+      if (matched) {
+        insCompany = matched.nameOfCompany || matched.insuranceCompany || '';
+        polNo = matched.tpPolicyNo || matched.policyNo || '';
+        polVal = matched.odEndDate || matched.tpEndDate || '';
+      }
+    } catch (e) {
+      console.warn('Error fetching insurance company for claim:', e);
+    }
+  }
+
+  if (existingClaim) {
+    // Update existing claim
+    const updated = {
+      ...existingClaim,
+      vehicleId: repairItem.vehicleId || existingClaim.vehicleId || '',
+      vehicleName: repairItem.carName || existingClaim.vehicleName || '',
+      dateOfAccident: repairItem.dateOfAccident || existingClaim.dateOfAccident || today(),
+      insuranceCompany: insCompany || existingClaim.insuranceCompany || '',
+      policyNo: polNo || existingClaim.policyNo || '',
+      policyValidity: polVal || existingClaim.policyValidity || '',
+      estimatedClaimAmount: repairItem.estimatedClaimAmount !== undefined && repairItem.estimatedClaimAmount !== '' ? repairItem.estimatedClaimAmount : (existingClaim.estimatedClaimAmount || ''),
+      typeOfClaim: repairItem.typeOfClaim || existingClaim.typeOfClaim || 'Own Damage',
+      accidentReason: repairItem.reasonForRepair || existingClaim.accidentReason || '',
+      driverName: repairItem.whoTakingCar || existingClaim.driverName || '',
+      accidentLocation: repairItem.garage || existingClaim.accidentLocation || '',
+      updatedAt: now
+    };
+    const idx = allClaims.findIndex(c => c.claimNo === existingClaim.claimNo);
+    allClaims[idx] = updated;
+    save(KEYS.CLAIMS, allClaims);
+
+    await sendToSheet({
+      action: 'update',
+      sheetName: 'If Accident / Insurance Claims',
+      keyField: 'Claim No.',
+      keyValue: existingClaim.claimNo,
+      data: claimToSheetRow(updated)
+    });
+    return updated;
+  } else {
+    // Auto-create new claim
+    const claimNo = generateClaimNo(allClaims);
+    const newClaim = {
+      id: generateId(),
+      claimNo,
+      repairNo: repairItem.repairNo,
+      vehicleId: repairItem.vehicleId || '',
+      vehicleName: repairItem.carName || '',
+      registrationNo: repairItem.registrationNo || '',
+      dateOfAccident: repairItem.dateOfAccident || today(),
+      timeOfAccident: repairItem.timeOfAccident || '',
+      accidentLocation: repairItem.garage || '',
+      accidentReason: repairItem.reasonForRepair || '',
+      driverName: repairItem.whoTakingCar || '',
+      driverMobileNo: repairItem.driverMobileNo || '',
+      insuranceCompany: insCompany,
+      policyNo: polNo,
+      policyValidity: polVal,
+      insuranceClaim: 'Yes',
+      estimatedClaimAmount: repairItem.estimatedClaimAmount || '',
+      typeOfClaim: repairItem.typeOfClaim || 'Own Damage',
+      accidentPhotos: null,
+      firRequired: 'No',
+      firCopy: null,
+      policeReport: null,
+      otherDocuments: null,
+      claimIntimatedDate: today(),
+      claimIntimationNo: '',
+      surveyorName: '',
+      surveyorMobileNo: '',
+      surveyDate: '',
+      surveyStatus: repairItem.surveyStatus || 'Pending',
+      claimStatus: repairItem.claimStatus || 'Claim Under Process',
+      claimApprovedAmount: '',
+      claimRejectedReason: '',
+      claimSettlementDate: '',
+      remarks: '',
+      timestamp: now,
+      createdAt: now
+    };
+    allClaims.push(newClaim);
+    save(KEYS.CLAIMS, allClaims);
+
+    await sendToSheet({
+      action: 'add',
+      sheetName: 'If Accident / Insurance Claims',
+      data: {
+        'Timestamp': now,
+        ...claimToSheetRow(newClaim),
+        'Actual': now
+      }
+    });
+    return newClaim;
+  }
+};
+
+// Auto-sync any existing repairs that have insurance claimed but no claim record yet
+export const syncPendingRepairClaims = async () => {
+  try {
+    const repairs = load(KEYS.REPAIRS);
+    const claims = load(KEYS.CLAIMS);
+    const pendingRepairs = repairs.filter(r => 
+      (r.insuranceToBeClaimed === 'Yes' || r.insuranceClaimed === 'Yes') &&
+      !claims.some(c => c.repairNo && c.repairNo === r.repairNo)
+    );
+    if (pendingRepairs.length === 0) return 0;
+    
+    for (const r of pendingRepairs) {
+      await autoSyncRepairClaim(r);
+    }
+    return pendingRepairs.length;
+  } catch (err) {
+    console.warn('Failed to sync pending repair claims:', err);
+    return 0;
+  }
+};
+
 export const addRepair = async (repair) => {
   const all = load(KEYS.REPAIRS);
   const now = createTimestamp();
@@ -1230,6 +1394,12 @@ export const addRepair = async (repair) => {
 
   const payload = mapRepairToSheet(item);
   await sendToSheet({ action: 'add', sheetName: 'FMS', data: payload });
+
+  // If Insurance to be claimed is Yes, automatically create & sync to If Accident / Insurance Claims!
+  if (item.insuranceToBeClaimed === 'Yes') {
+    await autoSyncRepairClaim(item);
+  }
+
   return item;
 };
 
@@ -1249,6 +1419,12 @@ export const updateRepair = async (repairNo, updates) => {
     keyValue: repairNo,
     data: payload
   });
+
+  // If Insurance to be claimed is Yes, ensure claim is synced to If Accident / Insurance Claims!
+  if (all[idx].insuranceToBeClaimed === 'Yes') {
+    await autoSyncRepairClaim(all[idx]);
+  }
+
   return all[idx];
 };
 
@@ -1276,6 +1452,7 @@ export const deleteRepair = async (repairNo) => {
 // ─── CLAIMS CRUD ──────────────────────────────────────────────────────────────
 export const getClaims = async () => {
   await delay();
+  await syncPendingRepairClaims();
   return load(KEYS.CLAIMS);
 };
 
@@ -1285,7 +1462,11 @@ export const addClaim = async (claim) => {
   const item = { ...claim, timestamp: now, createdAt: now };
   all.push(item);
   save(KEYS.CLAIMS, all);
-  await sendToSheet({ action: 'add', sheetName: 'If Accident / Insurance Claims', data: { ...item, Timestamp: now } });
+  await sendToSheet({
+    action: 'add',
+    sheetName: 'If Accident / Insurance Claims',
+    data: { 'Timestamp': now, ...claimToSheetRow(item), 'Actual': now },
+  });
   return item;
 };
 
@@ -1295,7 +1476,13 @@ export const updateClaim = async (claimNo, updates) => {
   if (idx === -1) throw new Error('Claim not found');
   all[idx] = { ...all[idx], ...updates, updatedAt: createTimestamp() };
   save(KEYS.CLAIMS, all);
-  await sendToSheet({ action: 'update', sheetName: 'If Accident / Insurance Claims', keyField: 'Claim No.', keyValue: claimNo, data: all[idx] });
+  await sendToSheet({
+    action: 'update',
+    sheetName: 'If Accident / Insurance Claims',
+    keyField: 'Claim No.',
+    keyValue: claimNo,
+    data: claimToSheetRow(all[idx]),
+  });
   return all[idx];
 };
 

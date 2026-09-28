@@ -1,13 +1,14 @@
 // pages/AccidentClaims.jsx
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Plus, Search, Eye, Edit2, Trash2, X, Wrench, Shield, FileText, User, CheckCircle, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getClaims, addClaim, updateClaim, deleteClaim, getRepairs, getCars, getInsurance, onStoreUpdate } from '../store/dataStore';
 import LoadingOverlay from '../components/ui/LoadingOverlay';
 import { generateClaimNo, generateId } from '../utils/idGenerator';
-import { formatDate, today } from '../utils/dateUtils';
+import { formatDate, today, toInputDate } from '../utils/dateUtils';
 import { validateForm, required } from '../utils/validators';
-import { CLAIM_STATUS_STEPS, ITEMS_PER_PAGE, SURVEY_STATUS } from '../constants';
+import { CLAIM_STATUS_STEPS, ITEMS_PER_PAGE, SURVEY_STATUS, CLAIM_TYPES } from '../constants';
 import { useAuth, PAGE_KEYS } from '../context/AuthContext';
 import ReadOnlyNotice from '../components/shared/ReadOnlyNotice';
 import Badge from '../components/ui/Badge';
@@ -23,7 +24,7 @@ const EMPTY_CLAIM = {
   repairNo: '', vehicleId: '', vehicleName: '', registrationNo: '',
   dateOfAccident: '', timeOfAccident: '', accidentLocation: '', accidentReason: '',
   driverName: '', driverMobileNo: '', insuranceCompany: '', policyNo: '',
-  policyValidity: '', insuranceClaim: 'Yes', estimatedClaimAmount: '',
+  policyValidity: '', insuranceClaim: 'Yes', estimatedClaimAmount: '', typeOfClaim: 'Own Damage',
   accidentPhotos: null, firRequired: 'No', firCopy: null, policeReport: null, otherDocuments: null,
   claimIntimatedDate: '', claimIntimationNo: '', surveyorName: '', surveyorMobileNo: '',
   surveyDate: '', surveyStatus: 'Pending', claimStatus: 'Claim Not Intimated',
@@ -46,11 +47,29 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
 
   const set = (field, val) => setForm(f => ({ ...f, [field]: val }));
 
-  const handleRepairSelect = (repairNo) => {
+  const handleRepairSelect = async (repairNo) => {
     const repair = repairs.find(r => r.repairNo === repairNo);
+    let insComp = form.insuranceCompany || '';
+    if (!insComp && repair) {
+      try {
+        const insList = await getInsurance();
+        const ins = insList.find(i => i.vehicleId === repair.vehicleId || (repair.carName && i.carName?.toLowerCase() === repair.carName?.toLowerCase()));
+        if (ins) insComp = ins.nameOfCompany || ins.insuranceCompany || '';
+      } catch (e) {}
+    }
     setForm(f => ({
-      ...f, repairNo, vehicleId: repair?.vehicleId || '',
-      vehicleName: repair?.carName || '', registrationNo: '',
+      ...f,
+      repairNo,
+      vehicleId: repair?.vehicleId || '',
+      vehicleName: repair?.carName || '',
+      registrationNo: repair?.registrationNo || f.registrationNo || '',
+      dateOfAccident: f.dateOfAccident || repair?.dateOfAccident || today(),
+      accidentReason: f.accidentReason || repair?.reasonForRepair || '',
+      accidentLocation: f.accidentLocation || repair?.garage || '',
+      driverName: f.driverName || repair?.whoTakingCar || '',
+      insuranceCompany: f.insuranceCompany || repair?.insuranceCompany || insComp,
+      estimatedClaimAmount: f.estimatedClaimAmount || repair?.estimatedClaimAmount || '',
+      typeOfClaim: f.typeOfClaim || repair?.typeOfClaim || 'Own Damage',
     }));
   };
 
@@ -124,7 +143,7 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
         <div className="form-group">
           <label className="form-label">Date of Accident <span className="required">*</span></label>
-          <input type="date" className="form-input" value={form.dateOfAccident} onChange={e => set('dateOfAccident', e.target.value)} />
+          <input type="date" className="form-input" value={toInputDate(form.dateOfAccident) || form.dateOfAccident || ''} onChange={e => set('dateOfAccident', e.target.value)} />
           {errors.dateOfAccident && <span className="form-error">{errors.dateOfAccident}</span>}
         </div>
         <div className="form-group">
@@ -169,6 +188,12 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
         <div className="form-group">
           <label className="form-label">Estimated Claim Amount (₹)</label>
           <input type="number" className="form-input" value={form.estimatedClaimAmount} onChange={e => set('estimatedClaimAmount', e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Type Of Claim</label>
+          <select className="form-select" value={form.typeOfClaim} onChange={e => set('typeOfClaim', e.target.value)}>
+            {CLAIM_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
         </div>
         <div className="form-group">
           <label className="form-label">FIR Required?</label>
@@ -311,6 +336,8 @@ const ClaimStatusStepper = ({ status }) => {
 };
 
 const AccidentClaims = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [claims, setClaims] = useState([]);
   const [repairs, setRepairs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -319,6 +346,7 @@ const AccidentClaims = () => {
   const [page, setPage] = useState(1);
   const [modal, setModal] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [preselectedRepairNo, setPreselectedRepairNo] = useState(null);
   const [deleteDialog, setDeleteDialog] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -336,6 +364,20 @@ const AccidentClaims = () => {
     });
     return unsub;
   }, [load]);
+
+  useEffect(() => {
+    const repairNo = location.state?.preselectedRepairNo;
+    const searchVal = location.state?.searchClaim;
+    if (searchVal) {
+      setSearch(searchVal);
+      navigate(location.pathname, { replace: true, state: {} });
+    } else if (repairNo) {
+      setSelected(null);
+      setPreselectedRepairNo(repairNo);
+      setModal('add');
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, location.pathname, navigate]);
 
   const filtered = claims.filter(c => {
     const q = search.toLowerCase();
@@ -374,7 +416,7 @@ const AccidentClaims = () => {
           <p className="page-subtitle">{claims.length} claim record{claims.length !== 1 ? 's' : ''} in tracking</p>
         </div>
         {canEdit && (
-          <button className="btn btn-primary" onClick={() => { setSelected(null); setModal('add'); }}>
+          <button className="btn btn-primary" onClick={() => { setSelected(null); setPreselectedRepairNo(null); setModal('add'); }}>
             <Plus size={16} strokeWidth={2.5} /> New Claim
           </button>
         )}
@@ -407,7 +449,7 @@ const AccidentClaims = () => {
           ) : paged.length === 0 ? (
             <EmptyState icon={AlertTriangle} title="No claims found"
               message="Accident claims will appear here when insurance is claimed from a repair."
-              action={canEdit ? <button className="btn btn-primary" onClick={() => setModal('add')}><Plus size={14} /> New Claim</button> : null}
+              action={canEdit ? <button className="btn btn-primary" onClick={() => { setSelected(null); setPreselectedRepairNo(null); setModal('add'); }}><Plus size={14} /> New Claim</button> : null}
             />
           ) : (
             <table className="data-table">
@@ -466,10 +508,10 @@ const AccidentClaims = () => {
       </div>
 
       {/* Add/Edit Modal */}
-      <Modal isOpen={modal === 'add' || modal === 'edit'} onClose={() => setModal(null)}
+      <Modal isOpen={modal === 'add' || modal === 'edit'} onClose={() => { setModal(null); setPreselectedRepairNo(null); }}
         title={modal === 'edit' ? `Edit Claim — ${selected?.claimNo}` : 'New Accident Claim'} icon={AlertTriangle} size="xl">
-        <ClaimForm claim={selected} claims={claims} repairs={repairs}
-          onClose={() => setModal(null)} onSaved={() => { setModal(null); load(); }} />
+        <ClaimForm claim={selected} claims={claims} repairs={repairs} preselectedRepairNo={preselectedRepairNo}
+          onClose={() => { setModal(null); setPreselectedRepairNo(null); }} onSaved={() => { setModal(null); setPreselectedRepairNo(null); load(); }} />
       </Modal>
 
       {/* View Modal */}
@@ -489,6 +531,7 @@ const AccidentClaims = () => {
                   ['Driver Mobile', selected.driverMobileNo], ['Insurance Company', selected.insuranceCompany],
                   ['Policy No.', selected.policyNo], ['Policy Validity', formatDate(selected.policyValidity)],
                   ['Estimated Amount', selected.estimatedClaimAmount ? `₹${Number(selected.estimatedClaimAmount).toLocaleString('en-IN')}` : '—'],
+                  ['Type Of Claim', selected.typeOfClaim],
                   ['Approved Amount', selected.claimApprovedAmount ? `₹${Number(selected.claimApprovedAmount).toLocaleString('en-IN')}` : '—'],
                   ['Surveyor', selected.surveyorName], ['Survey Date', formatDate(selected.surveyDate)],
                   ['Settlement Date', formatDate(selected.claimSettlementDate)],

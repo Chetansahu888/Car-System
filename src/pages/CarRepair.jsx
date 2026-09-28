@@ -1,8 +1,9 @@
 // pages/CarRepair.jsx
 import { useState, useEffect, useCallback } from 'react';
-import { Wrench, Plus, Search, Edit2, Trash2, Eye, X, AlertTriangle, Store, ChevronRight, Car, FileText, CheckCircle, Building, User, HelpCircle, Hash, Lock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Wrench, Plus, Search, Edit2, Trash2, Eye, X, AlertTriangle, Shield, Store, ChevronRight, Car, FileText, CheckCircle, Building, User, HelpCircle, Hash, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getCars, getRepairs, addRepair, updateRepair, deleteRepair, getVendorOffers, addVendorOffer, getClaims, onStoreUpdate } from '../store/dataStore';
+import { getCars, getRepairs, addRepair, updateRepair, deleteRepair, getVendorOffers, addVendorOffer, getClaims, getInsurance, onStoreUpdate } from '../store/dataStore';
 import LoadingOverlay from '../components/ui/LoadingOverlay';
 import { generateRepairNo, generateId } from '../utils/idGenerator';
 import { formatDate, today } from '../utils/dateUtils';
@@ -21,7 +22,8 @@ import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 
 const EMPTY_REPAIR = {
   vehicleId: '', carName: '', reasonForRepair: '',
-  garage: '', whoTakingCar: '', insuranceToBeClaimed: 'No', department: ''
+  garage: '', whoTakingCar: '', insuranceToBeClaimed: 'No', department: '',
+  dateOfAccident: '', insuranceCompany: '', estimatedClaimAmount: '', typeOfClaim: 'Own Damage'
 };
 
 const REPAIR_RULES = { vehicleId: [required], reasonForRepair: [required], garage: [required] };
@@ -29,36 +31,78 @@ const REPAIR_RULES = { vehicleId: [required], reasonForRepair: [required], garag
 const EMPTY_OFFER = { photoOfOffer: null, insurance: 'No', typesOfRepair: [] };
 
 // ─── Car Repair Form ──────────────────────────────────────────────────────────
-const RepairForm = ({ repair, cars, repairs, onClose, onSaved }) => {
+const RepairForm = ({ repair, cars, repairs, claims = [], onClose, onSaved }) => {
   const isEdit = !!repair;
   const autoRepairNo = isEdit ? repair.repairNo : generateRepairNo(repairs);
-  const [form, setForm] = useState(isEdit ? { ...repair } : { ...EMPTY_REPAIR, timestamp: today() });
+  const linkedClaim = claims?.find(c => c.repairNo === repair?.repairNo);
+  const [form, setForm] = useState(isEdit ? {
+    ...EMPTY_REPAIR,
+    ...repair,
+    insuranceCompany: repair?.insuranceCompany || linkedClaim?.insuranceCompany || '',
+    estimatedClaimAmount: (repair?.estimatedClaimAmount !== undefined && repair?.estimatedClaimAmount !== '')
+      ? repair.estimatedClaimAmount
+      : (linkedClaim?.estimatedClaimAmount || ''),
+    dateOfAccident: repair?.dateOfAccident || linkedClaim?.dateOfAccident || today(),
+    typeOfClaim: repair?.typeOfClaim || linkedClaim?.typeOfClaim || 'Own Damage',
+  } : {
+    ...EMPTY_REPAIR,
+    dateOfAccident: today(),
+    timestamp: today()
+  });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
 
   const set = (field, val) => setForm(f => ({ ...f, [field]: val }));
 
-  const handleCarSelect = (vehicleId) => {
+  const handleCarSelect = async (vehicleId) => {
     const car = cars.find(c => c.vehicleId === vehicleId);
-    set('vehicleId', vehicleId);
-    set('carName', car?.carName || '');
+    let insComp = form.insuranceCompany || '';
+    if (!insComp && car) {
+      try {
+        const insList = await getInsurance();
+        const ins = insList.find(i => i.vehicleId === vehicleId || (car.carName && i.carName?.toLowerCase() === car.carName.toLowerCase()));
+        if (ins) insComp = ins.nameOfCompany || ins.insuranceCompany || '';
+      } catch (e) {
+        console.warn('Could not auto-fetch car insurance:', e);
+      }
+    }
+    setForm(f => ({
+      ...f,
+      vehicleId,
+      carName: car?.carName || '',
+      insuranceCompany: f.insuranceCompany || insComp
+    }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const errs = validateForm(form, REPAIR_RULES);
+    const rules = { ...REPAIR_RULES };
+    if (form.insuranceToBeClaimed === 'Yes') {
+      rules.insuranceCompany = [required];
+      rules.estimatedClaimAmount = [required];
+    }
+    const errs = validateForm(form, rules);
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        dateOfAccident: form.dateOfAccident || (form.insuranceToBeClaimed === 'Yes' ? today() : ''),
+        typeOfClaim: form.typeOfClaim || 'Own Damage',
+      };
       if (isEdit) {
-        await updateRepair(repair.repairNo, { ...form, updatedAt: new Date().toISOString() });
-        toast.success(`Repair ${repair.repairNo} updated successfully`);
+        await updateRepair(repair.repairNo, { ...payload, updatedAt: new Date().toISOString() });
+        toast.success(`Repair ${repair.repairNo} updated successfully!`);
       } else {
         await addRepair({
-          ...form, repairNo: autoRepairNo, id: generateId(),
+          ...payload, repairNo: autoRepairNo, id: generateId(),
           repairStatus: 'Created', timestamp: new Date().toISOString(), createdAt: new Date().toISOString()
         });
-        toast.success(`Repair ${autoRepairNo} created successfully`);
+        toast.success(
+          form.insuranceToBeClaimed === 'Yes'
+            ? `Repair ${autoRepairNo} & Accident Claim created successfully!`
+            : `Repair ${autoRepairNo} created successfully`
+        );
       }
       onSaved();
     } catch (err) {
@@ -175,6 +219,89 @@ const RepairForm = ({ repair, cars, repairs, onClose, onSaved }) => {
             {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
           </select>
         </div>
+
+        {/* 8. When Insurance to be claimed === 'Yes': Professional Insurance Claim Section */}
+        {form.insuranceToBeClaimed === 'Yes' && (
+          <div
+            style={{
+              gridColumn: '1 / -1',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: 12,
+              padding: '16px 18px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 10, borderBottom: '1px solid #e2e8f0' }}>
+              <div
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  background: '#ecfdf5',
+                  color: '#059669',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <Shield size={16} strokeWidth={2.2} />
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                Insurance Claim Details
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">
+                  Insurance Company <span className="required">*</span>
+                </label>
+                <input
+                  className={`form-input ${errors.insuranceCompany ? 'error' : ''}`}
+                  value={form.insuranceCompany || ''}
+                  onChange={e => set('insuranceCompany', e.target.value)}
+                  placeholder="Enter insurance company name"
+                />
+                {errors.insuranceCompany && <span className="form-error">{errors.insuranceCompany}</span>}
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">
+                  Est. Amount <span className="required">*</span>
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    className={`form-input ${errors.estimatedClaimAmount ? 'error' : ''}`}
+                    value={form.estimatedClaimAmount || ''}
+                    onChange={e => set('estimatedClaimAmount', e.target.value)}
+                    placeholder="Enter amount"
+                    style={{ paddingLeft: 28 }}
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: 11,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: '#64748b',
+                      fontWeight: 600,
+                      fontSize: 14,
+                      pointerEvents: 'none'
+                    }}
+                  >
+                    ₹
+                  </span>
+                </div>
+                {errors.estimatedClaimAmount && <span className="form-error">{errors.estimatedClaimAmount}</span>}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="modal-footer" style={{ padding: '20px 0 0' }}>
@@ -194,7 +321,8 @@ const RepairForm = ({ repair, cars, repairs, onClose, onSaved }) => {
 };
 
 // ─── Car Repair Main Component ────────────────────────────────────────────────
-const CarRepair = ({ onNavigateToAccident }) => {
+const CarRepair = () => {
+  const navigate = useNavigate();
   const [cars, setCars] = useState([]);
   const [repairs, setRepairs] = useState([]);
   const [vendorOffers, setVendorOffers] = useState([]);
@@ -347,16 +475,53 @@ const CarRepair = ({ onNavigateToAccident }) => {
                             >
                               <Edit2 size={15} />
                             </button>
-                            {repair.insuranceToBeClaimed === 'Yes' && !hasClaimForRepair(repair.repairNo) && (
-                              <button
-                                type="button"
-                                className="btn btn-xs"
-                                title="Accident / Insurance Claim"
-                                style={{ background: '#ffedd5', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: 8, padding: '5px 8px', fontSize: 11.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                                onClick={() => { if (onNavigateToAccident) onNavigateToAccident(repair); }}
-                              >
-                                <AlertTriangle size={12} /> Claim
-                              </button>
+                            {repair.insuranceToBeClaimed === 'Yes' && (
+                              (() => {
+                                const clm = claims.find(c => c.repairNo === repair.repairNo);
+                                return clm ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn-xs"
+                                    title={`View Claim ${clm.claimNo} in Accident / Insurance Claims`}
+                                    style={{
+                                      background: '#ecfdf5',
+                                      color: '#059669',
+                                      border: '1px solid #a7f3d0',
+                                      borderRadius: 8,
+                                      padding: '5px 8px',
+                                      fontSize: 11.5,
+                                      fontWeight: 700,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 4
+                                    }}
+                                    onClick={() => navigate('/accident-claims', { state: { searchClaim: clm.claimNo } })}
+                                  >
+                                    <Shield size={12} /> {clm.claimNo}
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="btn btn-xs"
+                                    title="Accident / Insurance Claim"
+                                    style={{
+                                      background: '#ffedd5',
+                                      color: '#c2410c',
+                                      border: '1px solid #fed7aa',
+                                      borderRadius: 8,
+                                      padding: '5px 8px',
+                                      fontSize: 11.5,
+                                      fontWeight: 700,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 4
+                                    }}
+                                    onClick={() => navigate('/accident-claims', { state: { preselectedRepairNo: repair.repairNo } })}
+                                  >
+                                    <AlertTriangle size={12} /> Claim
+                                  </button>
+                                );
+                              })()
                             )}
                             <button
                               type="button"
@@ -384,7 +549,7 @@ const CarRepair = ({ onNavigateToAccident }) => {
       {/* Add / Edit Modal */}
       <Modal isOpen={modal === 'add' || modal === 'edit'} onClose={() => setModal(null)}
         title={modal === 'edit' ? `Edit Repair — ${selected?.repairNo}` : 'New Repair Record'} icon={Wrench} size="lg">
-        <RepairForm repair={selected} cars={cars} repairs={repairs} onClose={() => setModal(null)}
+        <RepairForm repair={selected} cars={cars} repairs={repairs} claims={claims} onClose={() => setModal(null)}
           onSaved={() => { setModal(null); load(); }} />
       </Modal>
 

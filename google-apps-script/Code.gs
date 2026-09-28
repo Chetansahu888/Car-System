@@ -11,6 +11,13 @@
  *   Col AD (Insurance Amount), Col AE (Bill Amount), Col AF (Bill Image)
  * - Formulas in Col L (Delay 1), Col T (Delay 2), Col W (Delay 3) are 100% PROTECTED!
  * =========================================================================
+ * If Accident / Insurance Claims Sheet (Row 6 = headers, Row 7+ = data):
+ * - New Claim Form: Writes Columns A:K (1 to 11) — Timestamp, Claim No., Repair No.,
+ *   Vehicle ID, Car Name, Date of Accident, Insurance Company, Est. Amount,
+ *   Type Of Claim, Survey, Claim Status
+ * - Col M (Actual / 13) is set to a client (React) generated timestamp on submit
+ * - Formulas in Col L (Planned), Col N (Delay) are 100% PROTECTED!
+ * =========================================================================
  * Google Drive Folder:
  * https://drive.google.com/drive/folders/1Ggn-bW9osS62VVJa5W8JRlS3rzyQAGEY
  * =========================================================================
@@ -30,6 +37,13 @@ function findHeaderRowInfo(sheet) {
   // FMS sheet explicitly uses Row 6 as the header row
   if (sName === 'fms' || sName === 'car_repair' || sName.includes('repair')) {
     const lastCol = Math.max(sheet.getLastColumn(), 35);
+    const r6 = sheet.getRange(6, 1, 1, lastCol).getValues()[0];
+    return { headerRowIndex: 6, headers: r6 };
+  }
+
+  // "If Accident / Insurance Claims" sheet explicitly uses Row 6 as the header row
+  if (sName.includes('accident')) {
+    const lastCol = Math.max(sheet.getLastColumn(), 14);
     const r6 = sheet.getRange(6, 1, 1, lastCol).getValues()[0];
     return { headerRowIndex: 6, headers: r6 };
   }
@@ -122,6 +136,9 @@ function doPost(e) {
     if (!sheet) {
       if ((sheetName.toLowerCase().includes('repair') || sheetName.toLowerCase() === 'fms') && ss.getSheetByName('FMS')) {
         sheet = ss.getSheetByName('FMS');
+      } else if (sheetName.toLowerCase().includes('accident')) {
+        const found = ss.getSheets().find(s => s.getName().trim().toLowerCase().includes('accident'));
+        if (found) sheet = found;
       } else if (sheetName.toLowerCase().includes('insurance')) {
         const found = ss.getSheets().find(s => {
           const n = s.getName().trim().toLowerCase();
@@ -194,6 +211,7 @@ function doPost(e) {
 
     const sName = sheet.getName().trim().toLowerCase();
     const isFMS = (sName === 'fms' || sName === 'car_repair');
+    const isAccidentClaims = sName.includes('accident');
 
     // ─── SPECIAL 1: SUBMIT VENDOR OFFER TO FMS ───
     // Col K: Actual 1 | Col M: Photo | Col N: Insurance | Col O: Types | Col P: Garage Name | Col Q: Expected Date
@@ -456,6 +474,29 @@ function doPost(e) {
         ];
         sheet.getRange(insertRowIndex, 1, 1, 9).setValues([fms9Values]);
         return createJsonResponse({ status: 'success', action: 'added', row: insertRowIndex, data: processedData });
+      } else if (isAccidentClaims) {
+        // 🔒 Accident/Insurance Claims: STRICTLY WRITE COLUMNS A TO K (1 to 11).
+        // Col L (Planned/12) & Col N (Delay/14) hold formulas and are NEVER touched!
+        const claimValues = [
+          findValueByHeader(processedData, 'Timestamp') || formatCustomTimestamp(),
+          findValueByHeader(processedData, 'Claim No.') || '',
+          findValueByHeader(processedData, 'Repair No.') || '',
+          findValueByHeader(processedData, 'Vehicle ID') || '',
+          findValueByHeader(processedData, 'Car Name') || '',
+          findValueByHeader(processedData, 'Date of Accident') || '',
+          findValueByHeader(processedData, 'Insurance Company') || '',
+          findValueByHeader(processedData, 'Est. Amount') || '',
+          findValueByHeader(processedData, 'Type Of Claim') || '',
+          findValueByHeader(processedData, 'Survey') || '',
+          findValueByHeader(processedData, 'Claim Status') || ''
+        ];
+        sheet.getRange(insertRowIndex, 1, 1, 11).setValues([claimValues]);
+
+        // Col M (Actual / 13): timestamp generated on the client (React) at submit time
+        const actualVal = findValueByHeader(processedData, 'Actual') || formatCustomTimestamp();
+        sheet.getRange(insertRowIndex, 13).setValue(actualVal);
+
+        return createJsonResponse({ status: 'success', action: 'added', row: insertRowIndex, data: processedData });
       } else {
         const rowValues = mapDataToHeaders(processedData, headers, sheet);
         sheet.getRange(insertRowIndex, 1, 1, rowValues.length).setValues([rowValues]);
@@ -507,6 +548,30 @@ function doPost(e) {
         ];
         sheet.getRange(targetRowIndex, 1, 1, 9).setValues([fms9Values]);
         return createJsonResponse({ status: 'success', action: 'updated', row: targetRowIndex, data: processedData });
+      } else if (isAccidentClaims) {
+        // 🔒 Accident/Insurance Claims: UPDATE STRICTLY COLUMNS A TO K (1 to 11).
+        // Col L (Planned/12) & Col N (Delay/14) hold formulas and are NEVER touched!
+        const existingRowData = allRows[targetRowIndex - 1];
+        const claimValues = [
+          findValueByHeader(processedData, 'Timestamp') || existingRowData[0] || formatCustomTimestamp(),
+          findValueByHeader(processedData, 'Claim No.') || existingRowData[1] || '',
+          findValueByHeader(processedData, 'Repair No.') || existingRowData[2] || '',
+          findValueByHeader(processedData, 'Vehicle ID') || existingRowData[3] || '',
+          findValueByHeader(processedData, 'Car Name') || existingRowData[4] || '',
+          findValueByHeader(processedData, 'Date of Accident') || existingRowData[5] || '',
+          findValueByHeader(processedData, 'Insurance Company') || existingRowData[6] || '',
+          findValueByHeader(processedData, 'Est. Amount') || existingRowData[7] || '',
+          findValueByHeader(processedData, 'Type Of Claim') || existingRowData[8] || '',
+          findValueByHeader(processedData, 'Survey') || existingRowData[9] || '',
+          findValueByHeader(processedData, 'Claim Status') || existingRowData[10] || ''
+        ];
+        sheet.getRange(targetRowIndex, 1, 1, 11).setValues([claimValues]);
+
+        // Col M (Actual/13): only overwrite when the client explicitly sends a value
+        const actualVal = findValueByHeader(processedData, 'Actual');
+        if (actualVal) sheet.getRange(targetRowIndex, 13).setValue(actualVal);
+
+        return createJsonResponse({ status: 'success', action: 'updated', row: targetRowIndex, data: processedData });
       } else {
         const existingRowData = allRows[targetRowIndex - 1];
         const updatedRowData = headers.map((header, colIdx) => {
@@ -537,6 +602,9 @@ function doPost(e) {
           if (String(allRows[r][headerColIndex]).trim().toLowerCase() === String(keyValue).trim().toLowerCase()) {
             if (isFMS) {
               sheet.getRange(r + 1, 1, 1, Math.max(sheet.getLastColumn(), 35)).clearContent();
+            } else if (isAccidentClaims) {
+              sheet.getRange(r + 1, 1, 1, 11).clearContent();
+              sheet.getRange(r + 1, 13).clearContent();
             } else {
               sheet.deleteRow(r + 1);
             }
