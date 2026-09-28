@@ -52,11 +52,12 @@ const FileUpload = ({ value, onChange, accept = '*', label = 'Upload File', id }
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const isDriveLink = value?.url && value.url.includes('drive.google.com');
+  const fileObj = typeof value === 'string' && value.trim() ? { url: value.trim(), name: 'Uploaded Document' } : value;
+  const isDriveLink = fileObj?.url && typeof fileObj.url === 'string' && fileObj.url.includes('drive.google.com');
 
   return (
     <div>
-      {value?.url ? (
+      {fileObj?.url ? (
         <div className="file-upload-area has-file" style={{
           display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
           padding: '12px 16px', background: '#ecfdf5', border: '1.5px solid #a7f3d0',
@@ -79,7 +80,7 @@ const FileUpload = ({ value, onChange, accept = '*', label = 'Upload File', id }
               fontSize: 13, fontWeight: 700, color: '#0f172a',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
             }}>
-              {value.name || 'Uploaded File'}
+              {fileObj.name || 'Uploaded File'}
             </div>
             <div style={{ fontSize: 11.5, color: '#059669', display: 'flex', alignItems: 'center', gap: 5, marginTop: 2, fontWeight: 600 }}>
               {uploading ? (
@@ -92,23 +93,27 @@ const FileUpload = ({ value, onChange, accept = '*', label = 'Upload File', id }
                 </span>
               ) : (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Sparkles size={12} /> Ready ({formatSize(value.size)})
+                  <Sparkles size={12} /> Ready {fileObj.size ? `(${formatSize(fileObj.size)})` : ''}
                 </span>
               )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            {value.url && (
-              <a
-                href={value.url}
-                target="_blank"
-                rel="noopener noreferrer"
+            {fileObj.url && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof fileObj.url === 'string') {
+                    if (fileObj.url.startsWith('http')) window.open(fileObj.url, '_blank', 'noopener,noreferrer');
+                    else window.open(fileObj.url, '_blank');
+                  }
+                }}
                 className="btn btn-ghost btn-xs"
                 title="View / Open File"
                 style={{ color: '#059669', background: '#ffffff', border: '1px solid #d1fae5', borderRadius: 8 }}
               >
                 <Eye size={14} />
-              </a>
+              </button>
             )}
             <button
               type="button"

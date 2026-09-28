@@ -522,23 +522,23 @@ export const mapSheetRowToClaim = (row, index) => {
     policyNo: get('Policy No.', 'Policy No', 'policyNo'),
     policyValidity: get('Policy Validity', 'policyValidity'),
     insuranceClaim: get('Insurance Claim', 'insuranceClaim') || 'Yes',
-    estimatedClaimAmount: get('Est. Amount', 'Estimated Claim Amount', 'estimatedClaimAmount'),
+    estimatedClaimAmount: get('Estimated Claim Amount (₹)', 'Estimated Claim Amount', 'Est. Amount', 'estimatedClaimAmount'),
     typeOfClaim: get('Type Of Claim', 'typeOfClaim') || 'Own Damage',
-    accidentPhotos: get('Accident Photos', 'accidentPhotos'),
-    firRequired: get('FIR Required', 'firRequired') || 'No',
-    firCopy: get('FIR Copy', 'firCopy'),
-    policeReport: get('Police Report', 'policeReport'),
-    otherDocuments: get('Other Documents', 'otherDocuments'),
-    claimIntimatedDate: get('Claim Intimated Date', 'claimIntimatedDate'),
-    claimIntimationNo: get('Claim Intimation No.', 'claimIntimationNo'),
-    surveyorName: get('Surveyor Name', 'surveyorName'),
-    surveyorMobileNo: get('Surveyor Mobile No.', 'surveyorMobileNo'),
+    accidentPhotos: get('Accident Photos', 'Accident Photo', 'accidentPhotos', 'accidentPhoto', 'photos', 'photo'),
+    firRequired: get('FIR Required?', 'FIR Required', 'firRequired') || 'No',
+    firCopy: get('FIR Copy', 'FIR', 'firCopy'),
+    policeReport: get('Police Report', 'policeReport', 'Police Report Copy', 'Report'),
+    otherDocuments: get('Other Documents', 'Other Document', 'otherDocuments', 'otherDocument', 'Documents', 'Document'),
+    claimIntimatedDate: get('Claim Intimated Date', 'Claim Intimated', 'claimIntimatedDate'),
+    claimIntimationNo: get('Claim Intimation No.', 'Claim Intimation No', 'Claim Intimation', 'claimIntimationNo'),
+    surveyorName: get('Surveyor Name', 'Surveyor', 'surveyorName'),
+    surveyorMobileNo: get('Surveyor Mobile No.', 'Surveyor Mobile', 'surveyorMobileNo'),
     surveyDate: get('Survey Date', 'surveyDate'),
     surveyStatus: get('Survey', 'Survey Status', 'surveyStatus') || 'Pending',
     claimStatus: get('Claim Status', 'claimStatus') || 'Claim Under Process',
-    claimApprovedAmount: get('Claim Approved Amount', 'claimApprovedAmount'),
-    claimRejectedReason: get('Claim Rejected Reason', 'claimRejectedReason'),
-    claimSettlementDate: get('Claim Settlement Date', 'claimSettlementDate'),
+    claimApprovedAmount: get('Claim Approved Amount (₹)', 'Claim Approved Amount', 'Approved Amount', 'claimApprovedAmount'),
+    claimRejectedReason: get('Claim Rejected Reason', 'Rejection Reason', 'claimRejectedReason'),
+    claimSettlementDate: get('Settlement Date', 'Claim Settlement Date', 'claimSettlementDate'),
     remarks: get('Remarks', 'remarks'),
     planned: get('Planned', 'planned'),
     actual: get('Actual', 'actual'),
@@ -1231,19 +1231,16 @@ export const getRepairs = async () => {
   return load(KEYS.REPAIRS);
 };
 
-// Maps a claim record to the exact "If Accident / Insurance Claims" sheet headers (Row 6, Col A:K).
-// Col L (Planned) & Col N (Delay) are formula-driven and must never be sent from here.
+// Maps a claim record to the exact "If Accident / Insurance Claims" sheet headers:
+// - Columns A:F (Cols 1 to 6): Incident info
+// - Col G (Planned) & Col I (Delay) are formula-driven and must never be touched.
+// - Col H (Actual) is set only when process claim form is submitted.
 export const claimToSheetRow = (item) => ({
   'Claim No.': item.claimNo || '',
   'Repair No.': item.repairNo || '',
   'Vehicle ID': item.vehicleId || '',
   'Car Name': item.vehicleName || item.carName || '',
   'Date of Accident': item.dateOfAccident || '',
-  'Insurance Company': item.insuranceCompany || '',
-  'Est. Amount': item.estimatedClaimAmount || '',
-  'Type Of Claim': item.typeOfClaim || 'Own Damage',
-  'Survey': item.surveyStatus || 'Pending',
-  'Claim Status': item.claimStatus || 'Claim Under Process',
 });
 
 // ─── AUTOMATICALLY SYNC REPAIR WITH ACCIDENT CLAIM ───────────────────────────
@@ -1357,7 +1354,6 @@ export const autoSyncRepairClaim = async (repairItem) => {
       data: {
         'Timestamp': now,
         ...claimToSheetRow(newClaim),
-        'Actual': now
       }
     });
     return newClaim;
@@ -1465,7 +1461,7 @@ export const addClaim = async (claim) => {
   await sendToSheet({
     action: 'add',
     sheetName: 'If Accident / Insurance Claims',
-    data: { 'Timestamp': now, ...claimToSheetRow(item), 'Actual': now },
+    data: { 'Timestamp': now, ...claimToSheetRow(item) },
   });
   return item;
 };
@@ -1476,12 +1472,78 @@ export const updateClaim = async (claimNo, updates) => {
   if (idx === -1) throw new Error('Claim not found');
   all[idx] = { ...all[idx], ...updates, updatedAt: createTimestamp() };
   save(KEYS.CLAIMS, all);
+
+  const sheetData = claimToSheetRow(all[idx]);
+  if (all[idx].actual) {
+    sheetData['Actual'] = all[idx].actual;
+  }
+
   await sendToSheet({
     action: 'update',
     sheetName: 'If Accident / Insurance Claims',
     keyField: 'Claim No.',
     keyValue: claimNo,
-    data: claimToSheetRow(all[idx]),
+    data: sheetData,
+  });
+  return all[idx];
+};
+
+export const processAccidentClaim = async (claimNo, processData) => {
+  const all = load(KEYS.CLAIMS);
+  const idx = all.findIndex(c => c.claimNo === claimNo);
+  if (idx === -1) throw new Error('Claim not found');
+  const now = createTimestamp();
+  all[idx] = {
+    ...all[idx],
+    ...processData,
+    actual: now,
+    isProcessed: true,
+    updatedAt: now
+  };
+  save(KEYS.CLAIMS, all);
+
+  const sheetData = {
+    ...claimToSheetRow(all[idx]),
+    'Actual': now,
+    // Process Claim Details columns (matching sheet headers shown in image)
+    'Policy No.': all[idx].policyNo || '',
+    'Insurance Company': all[idx].insuranceCompany || '',
+    'Insurance Comp': all[idx].insuranceCompany || '',
+    'Estimated Claim Amount': all[idx].estimatedClaimAmount || '',
+    'Estimated Claim': all[idx].estimatedClaimAmount || '',
+    'Estimated Claim Amount (₹)': all[idx].estimatedClaimAmount || '',
+    'Type Of Claim': all[idx].typeOfClaim || 'Own Damage',
+    'Policy Validity': all[idx].policyValidity || '',
+    'FIR Required?': all[idx].firRequired || 'No',
+    'FIR Required': all[idx].firRequired || 'No',
+    'Survey': all[idx].surveyStatus || 'Pending',
+    'Survey Status': all[idx].surveyStatus || 'Pending',
+    'Claim Status': all[idx].claimStatus || 'Claim Under Process',
+    'Claim Intimated Date': all[idx].claimIntimatedDate || '',
+    'Claim Intimated': all[idx].claimIntimatedDate || '',
+    'Claim Intimation No.': all[idx].claimIntimationNo || '',
+    'Claim Intimation': all[idx].claimIntimationNo || '',
+    'Survey Date': all[idx].surveyDate || '',
+    'Settlement Date': all[idx].claimSettlementDate || '',
+    'Accident Photos': typeof all[idx].accidentPhotos === 'string' ? all[idx].accidentPhotos : (all[idx].accidentPhotos?.url || ''),
+    'Accident Photo': typeof all[idx].accidentPhotos === 'string' ? all[idx].accidentPhotos : (all[idx].accidentPhotos?.url || ''),
+    'Police Report': typeof all[idx].policeReport === 'string' ? all[idx].policeReport : (all[idx].policeReport?.url || ''),
+    'Other Documents': typeof all[idx].otherDocuments === 'string' ? all[idx].otherDocuments : (all[idx].otherDocuments?.url || ''),
+    'Other Document': typeof all[idx].otherDocuments === 'string' ? all[idx].otherDocuments : (all[idx].otherDocuments?.url || ''),
+    'FIR Copy': typeof all[idx].firCopy === 'string' ? all[idx].firCopy : (all[idx].firCopy?.url || ''),
+    'Surveyor Name': all[idx].surveyorName || '',
+    'Surveyor Mobile No.': all[idx].surveyorMobileNo || '',
+    'Claim Approved Amount': all[idx].claimApprovedAmount || '',
+    'Claim Rejected Reason': all[idx].claimRejectedReason || '',
+    'Remarks': all[idx].remarks || ''
+  };
+
+  await sendToSheet({
+    action: 'update',
+    sheetName: 'If Accident / Insurance Claims',
+    keyField: 'Claim No.',
+    keyValue: claimNo,
+    data: sheetData,
   });
   return all[idx];
 };

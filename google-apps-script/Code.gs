@@ -12,11 +12,13 @@
  * - Formulas in Col L (Delay 1), Col T (Delay 2), Col W (Delay 3) are 100% PROTECTED!
  * =========================================================================
  * If Accident / Insurance Claims Sheet (Row 6 = headers, Row 7+ = data):
- * - New Claim Form: Writes Columns A:K (1 to 11) — Timestamp, Claim No., Repair No.,
- *   Vehicle ID, Car Name, Date of Accident, Insurance Company, Est. Amount,
- *   Type Of Claim, Survey, Claim Status
- * - Col M (Actual / 13) is set to a client (React) generated timestamp on submit
- * - Formulas in Col L (Planned), Col N (Delay) are 100% PROTECTED!
+ * - Incident Columns: Writes Columns A:F (1 to 6) — Timestamp, Claim No., Repair No.,
+ *   Vehicle ID, Car Name, Date of Accident
+ * - Formulas in Col G (Planned / 7) and Col I (Delay / 9) are 100% PROTECTED!
+ * - Col H (Actual / 8) is set to a client-generated timestamp when Process Claim form is submitted
+ * - Process Claim Details: Columns J onwards (10 onwards) — Policy No., Insurance Company,
+ *   Estimated Claim Amount (₹), Type Of Claim, Policy Validity, FIR Required?, Survey, Claim Status,
+ *   Claim Intimated Date, Claim Intimation No., Survey Date, Settlement Date, Accident Photos, Police Report, Other Documents
  * =========================================================================
  * Google Drive Folder:
  * https://drive.google.com/drive/folders/1Ggn-bW9osS62VVJa5W8JRlS3rzyQAGEY
@@ -43,7 +45,7 @@ function findHeaderRowInfo(sheet) {
 
   // "If Accident / Insurance Claims" sheet explicitly uses Row 6 as the header row
   if (sName.includes('accident')) {
-    const lastCol = Math.max(sheet.getLastColumn(), 14);
+    const lastCol = Math.max(sheet.getLastColumn(), 35);
     const r6 = sheet.getRange(6, 1, 1, lastCol).getValues()[0];
     return { headerRowIndex: 6, headers: r6 };
   }
@@ -475,26 +477,36 @@ function doPost(e) {
         sheet.getRange(insertRowIndex, 1, 1, 9).setValues([fms9Values]);
         return createJsonResponse({ status: 'success', action: 'added', row: insertRowIndex, data: processedData });
       } else if (isAccidentClaims) {
-        // 🔒 Accident/Insurance Claims: STRICTLY WRITE COLUMNS A TO K (1 to 11).
-        // Col L (Planned/12) & Col N (Delay/14) hold formulas and are NEVER touched!
-        const claimValues = [
+        // 🔒 Accident/Insurance Claims (New Layout from Screenshot):
+        // - Cols A:F (1 to 6): Timestamp, Claim No., Repair No., Vehicle ID, Car Name, Date of Accident
+        // - Col G (Planned / 7) & Col I (Delay / 9): hold formulas and are NEVER touched!
+        // - Col H (Actual / 8): client generated timestamp on submit
+        // - Cols J onwards (10 onwards): Process Claim Details (Policy No., Insurance Company, etc.)
+        const claim6Values = [
           findValueByHeader(processedData, 'Timestamp') || formatCustomTimestamp(),
           findValueByHeader(processedData, 'Claim No.') || '',
           findValueByHeader(processedData, 'Repair No.') || '',
           findValueByHeader(processedData, 'Vehicle ID') || '',
           findValueByHeader(processedData, 'Car Name') || '',
-          findValueByHeader(processedData, 'Date of Accident') || '',
-          findValueByHeader(processedData, 'Insurance Company') || '',
-          findValueByHeader(processedData, 'Est. Amount') || '',
-          findValueByHeader(processedData, 'Type Of Claim') || '',
-          findValueByHeader(processedData, 'Survey') || '',
-          findValueByHeader(processedData, 'Claim Status') || ''
+          findValueByHeader(processedData, 'Date of Accident') || ''
         ];
-        sheet.getRange(insertRowIndex, 1, 1, 11).setValues([claimValues]);
+        sheet.getRange(insertRowIndex, 1, 1, 6).setValues([claim6Values]);
 
-        // Col M (Actual / 13): timestamp generated on the client (React) at submit time
-        const actualVal = findValueByHeader(processedData, 'Actual') || formatCustomTimestamp();
-        sheet.getRange(insertRowIndex, 13).setValue(actualVal);
+        // Col H (Actual / Col 8): only write when explicitly provided
+        const actualVal = findValueByHeader(processedData, 'Actual');
+        if (actualVal) {
+          sheet.getRange(insertRowIndex, 8).setValue(actualVal);
+        }
+
+        // Process Claim Details columns (Columns 10 onwards: J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X...)
+        for (let c = 10; c <= headers.length; c++) {
+          const headerName = headers[c - 1];
+          if (!headerName) continue;
+          const val = findValueByHeader(processedData, headerName);
+          if (val !== undefined && val !== null && val !== '') {
+            sheet.getRange(insertRowIndex, c).setValue(formatValueForSheet(val));
+          }
+        }
 
         return createJsonResponse({ status: 'success', action: 'added', row: insertRowIndex, data: processedData });
       } else {
@@ -549,27 +561,35 @@ function doPost(e) {
         sheet.getRange(targetRowIndex, 1, 1, 9).setValues([fms9Values]);
         return createJsonResponse({ status: 'success', action: 'updated', row: targetRowIndex, data: processedData });
       } else if (isAccidentClaims) {
-        // 🔒 Accident/Insurance Claims: UPDATE STRICTLY COLUMNS A TO K (1 to 11).
-        // Col L (Planned/12) & Col N (Delay/14) hold formulas and are NEVER touched!
+        // 🔒 Accident/Insurance Claims (Adjusted layout according to screenshot):
+        // - Incident Columns A:F (1 to 6): Timestamp, Claim No., Repair No., Vehicle ID, Car Name, Date of Accident
+        // - Col G (Planned / 7) & Col I (Delay / 9): hold formulas and are NEVER touched!
+        // - Col H (Actual / 8): write client generated timestamp when process claim is submitted
+        // - Process Claim Details: Col J onwards (10 onwards) dynamically matched by headers
         const existingRowData = allRows[targetRowIndex - 1];
-        const claimValues = [
+        const claim6Values = [
           findValueByHeader(processedData, 'Timestamp') || existingRowData[0] || formatCustomTimestamp(),
           findValueByHeader(processedData, 'Claim No.') || existingRowData[1] || '',
           findValueByHeader(processedData, 'Repair No.') || existingRowData[2] || '',
           findValueByHeader(processedData, 'Vehicle ID') || existingRowData[3] || '',
           findValueByHeader(processedData, 'Car Name') || existingRowData[4] || '',
-          findValueByHeader(processedData, 'Date of Accident') || existingRowData[5] || '',
-          findValueByHeader(processedData, 'Insurance Company') || existingRowData[6] || '',
-          findValueByHeader(processedData, 'Est. Amount') || existingRowData[7] || '',
-          findValueByHeader(processedData, 'Type Of Claim') || existingRowData[8] || '',
-          findValueByHeader(processedData, 'Survey') || existingRowData[9] || '',
-          findValueByHeader(processedData, 'Claim Status') || existingRowData[10] || ''
+          findValueByHeader(processedData, 'Date of Accident') || existingRowData[5] || ''
         ];
-        sheet.getRange(targetRowIndex, 1, 1, 11).setValues([claimValues]);
+        sheet.getRange(targetRowIndex, 1, 1, 6).setValues([claim6Values]);
 
-        // Col M (Actual/13): only overwrite when the client explicitly sends a value
+        // Col H (Actual / Col 8): only overwrite when the client explicitly sends an Actual value
         const actualVal = findValueByHeader(processedData, 'Actual');
-        if (actualVal) sheet.getRange(targetRowIndex, 13).setValue(actualVal);
+        if (actualVal) sheet.getRange(targetRowIndex, 8).setValue(actualVal);
+
+        // Process Claim Details columns (Columns 10 onwards: J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X...)
+        for (let c = 10; c <= headers.length; c++) {
+          const headerName = headers[c - 1];
+          if (!headerName) continue;
+          const val = findValueByHeader(processedData, headerName);
+          if (val !== undefined && val !== null && val !== '') {
+            sheet.getRange(targetRowIndex, c).setValue(formatValueForSheet(val));
+          }
+        }
 
         return createJsonResponse({ status: 'success', action: 'updated', row: targetRowIndex, data: processedData });
       } else {
