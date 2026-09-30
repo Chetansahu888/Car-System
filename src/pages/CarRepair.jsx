@@ -8,7 +8,7 @@ import LoadingOverlay from '../components/ui/LoadingOverlay';
 import { generateRepairNo, generateId } from '../utils/idGenerator';
 import { formatDate, today } from '../utils/dateUtils';
 import { validateForm, required } from '../utils/validators';
-import { DEPARTMENTS, ITEMS_PER_PAGE, TYPES_OF_REPAIR } from '../constants';
+import { DEPARTMENTS, ITEMS_PER_PAGE, TYPES_OF_REPAIR, CLAIM_TYPES, CLAIM_MODES } from '../constants';
 import { useAuth, PAGE_KEYS } from '../context/AuthContext';
 import ReadOnlyNotice from '../components/shared/ReadOnlyNotice';
 import Badge from '../components/ui/Badge';
@@ -23,7 +23,7 @@ import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 const EMPTY_REPAIR = {
   vehicleId: '', carName: '', reasonForRepair: '',
   garage: '', whoTakingCar: '', insuranceToBeClaimed: 'No', department: '',
-  dateOfAccident: '', insuranceCompany: '', estimatedClaimAmount: '', typeOfClaim: 'Own Damage'
+  dateOfAccident: '', insuranceCompany: '', estimatedClaimAmount: '', typeOfClaim: 'Own Damage', claimMode: 'Cashless Claim (Network Garage)'
 };
 
 const REPAIR_RULES = { vehicleId: [required], reasonForRepair: [required], garage: [required] };
@@ -44,6 +44,7 @@ const RepairForm = ({ repair, cars, repairs, claims = [], onClose, onSaved }) =>
       : (linkedClaim?.estimatedClaimAmount || ''),
     dateOfAccident: repair?.dateOfAccident || linkedClaim?.dateOfAccident || today(),
     typeOfClaim: repair?.typeOfClaim || linkedClaim?.typeOfClaim || 'Own Damage',
+    claimMode: repair?.claimMode || linkedClaim?.claimMode || 'Cashless Claim (Network Garage)',
   } : {
     ...EMPTY_REPAIR,
     dateOfAccident: today(),
@@ -89,6 +90,7 @@ const RepairForm = ({ repair, cars, repairs, claims = [], onClose, onSaved }) =>
         ...form,
         dateOfAccident: form.dateOfAccident || (form.insuranceToBeClaimed === 'Yes' ? today() : ''),
         typeOfClaim: form.typeOfClaim || 'Own Damage',
+        claimMode: form.claimMode || 'Cashless Claim (Network Garage)',
       };
       if (isEdit) {
         await updateRepair(repair.repairNo, { ...payload, updatedAt: new Date().toISOString() });
@@ -298,6 +300,28 @@ const RepairForm = ({ repair, cars, repairs, claims = [], onClose, onSaved }) =>
                   </span>
                 </div>
                 {errors.estimatedClaimAmount && <span className="form-error">{errors.estimatedClaimAmount}</span>}
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Type Of Claim</label>
+                <select
+                  className="form-select"
+                  value={form.typeOfClaim || 'Own Damage'}
+                  onChange={e => set('typeOfClaim', e.target.value)}
+                >
+                  {CLAIM_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Claim Settlement Mode</label>
+                <select
+                  className="form-select"
+                  value={form.claimMode || 'Cashless Claim (Network Garage)'}
+                  onChange={e => set('claimMode', e.target.value)}
+                >
+                  {CLAIM_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
               </div>
             </div>
           </div>

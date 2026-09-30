@@ -150,10 +150,34 @@ function AppRoutes() {
       />
       <Route
         path="/accident-claims"
+        element={<Navigate to="/accident-claims/claim-of-accident" replace />}
+      />
+      <Route
+        path="/accident-claims/claim-of-accident"
         element={
           <ProtectedRoute pageKey={PAGE_KEYS.ACCIDENT_CLAIMS}>
             <Layout>
-              <AccidentClaims />
+              <AccidentClaims defaultStage="incident" />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/accident-claims/process-of-claim"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.ACCIDENT_CLAIMS}>
+            <Layout>
+              <AccidentClaims defaultStage="process" />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/accident-claims/claim-settlement"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.ACCIDENT_CLAIMS}>
+            <Layout>
+              <AccidentClaims defaultStage="settlement" />
             </Layout>
           </ProtectedRoute>
         }

@@ -51,6 +51,11 @@ export const SURVEY_STATUS = ['Pending', 'Scheduled', 'Completed'];
 
 export const CLAIM_TYPES = ['Own Damage', 'Third Party', 'Total Loss', 'Theft', 'Windshield', 'Other'];
 
+export const CLAIM_MODES = [
+  'Cashless Claim (Network Garage)',
+  'Reimbursement Claim (Pehle khud pay kiya)',
+];
+
 export const TYPES_OF_REPAIR = [
   'Denting',
   'Painting',

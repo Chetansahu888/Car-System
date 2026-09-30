@@ -229,3 +229,23 @@ export const calcEmiDetails = (car) => {
     payDay,
   };
 };
+
+export const getClaimTATDays = (typeOfClaim) => {
+  if (!typeOfClaim) return null;
+  const t = String(typeOfClaim).toLowerCase();
+  if (t.includes('cashless')) return 2; // 24-48 hours (~2 days)
+  if (t.includes('reimbursement')) return 15; // 7-15 days (~15 days)
+  return null;
+};
+
+export const calculateExpectedSettlementDate = (baseDateStr, typeOfClaim) => {
+  const tatDays = getClaimTATDays(typeOfClaim);
+  if (!tatDays) return '';
+  const parsed = parseAnyDate(baseDateStr) || new Date();
+  const exp = new Date(parsed);
+  exp.setDate(exp.getDate() + tatDays);
+  const year = exp.getFullYear();
+  const month = String(exp.getMonth() + 1).padStart(2, '0');
+  const day = String(exp.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};

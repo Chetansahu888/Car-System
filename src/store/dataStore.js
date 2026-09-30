@@ -524,6 +524,7 @@ export const mapSheetRowToClaim = (row, index) => {
     insuranceClaim: get('Insurance Claim', 'insuranceClaim') || 'Yes',
     estimatedClaimAmount: get('Estimated Claim Amount (₹)', 'Estimated Claim Amount', 'Est. Amount', 'estimatedClaimAmount'),
     typeOfClaim: get('Type Of Claim', 'typeOfClaim') || 'Own Damage',
+    claimMode: get('Claim Mode', 'Claim Settlement Mode', 'Settlement Mode', 'claimMode') || 'Cashless Claim (Network Garage)',
     accidentPhotos: get('Accident Photos', 'Accident Photo', 'accidentPhotos', 'accidentPhoto', 'photos', 'photo'),
     firRequired: get('FIR Required?', 'FIR Required', 'firRequired') || 'No',
     firCopy: get('FIR Copy', 'FIR', 'firCopy'),
@@ -538,11 +539,15 @@ export const mapSheetRowToClaim = (row, index) => {
     claimStatus: get('Claim Status', 'claimStatus') || 'Claim Under Process',
     claimApprovedAmount: get('Claim Approved Amount (₹)', 'Claim Approved Amount', 'Approved Amount', 'claimApprovedAmount'),
     claimRejectedReason: get('Claim Rejected Reason', 'Rejection Reason', 'claimRejectedReason'),
+    expectedSettlementDate: get('Expected Settlement Date', 'Expected Settlement', 'expectedSettlementDate'),
     claimSettlementDate: get('Settlement Date', 'Claim Settlement Date', 'claimSettlementDate'),
     remarks: get('Remarks', 'remarks'),
     planned: get('Planned', 'planned'),
     actual: get('Actual', 'actual'),
     delay: get('Delay', 'delay'),
+    stage1Completed: get('Stage 1 Completed', 'stage1Completed') !== undefined ? (get('Stage 1 Completed', 'stage1Completed') === true || get('Stage 1 Completed', 'stage1Completed') === 'true' || get('Stage 1 Completed', 'stage1Completed') === 'Yes') : undefined,
+    stage2Completed: get('Stage 2 Completed', 'stage2Completed') !== undefined ? (get('Stage 2 Completed', 'stage2Completed') === true || get('Stage 2 Completed', 'stage2Completed') === 'true' || get('Stage 2 Completed', 'stage2Completed') === 'Yes') : undefined,
+    stage3Completed: get('Stage 3 Completed', 'stage3Completed') !== undefined ? (get('Stage 3 Completed', 'stage3Completed') === true || get('Stage 3 Completed', 'stage3Completed') === 'true' || get('Stage 3 Completed', 'stage3Completed') === 'Yes') : undefined,
     createdAt: get('Timestamp', 'createdAt') || createTimestamp(),
   };
 };
@@ -1241,6 +1246,13 @@ export const claimToSheetRow = (item) => ({
   'Vehicle ID': item.vehicleId || '',
   'Car Name': item.vehicleName || item.carName || '',
   'Date of Accident': item.dateOfAccident || '',
+  'Type Of Claim': item.typeOfClaim || 'Own Damage',
+  'Claim Mode': item.claimMode || 'Cashless Claim (Network Garage)',
+  'Expected Settlement Date': item.expectedSettlementDate || '',
+  'Settlement Date': item.claimSettlementDate || '',
+  'Stage 1 Completed': item.stage1Completed ? 'Yes' : 'No',
+  'Stage 2 Completed': item.stage2Completed ? 'Yes' : 'No',
+  'Stage 3 Completed': item.stage3Completed ? 'Yes' : 'No',
 });
 
 // ─── AUTOMATICALLY SYNC REPAIR WITH ACCIDENT CLAIM ───────────────────────────
@@ -1326,11 +1338,15 @@ export const autoSyncRepairClaim = async (repairItem) => {
       insuranceClaim: 'Yes',
       estimatedClaimAmount: repairItem.estimatedClaimAmount || '',
       typeOfClaim: repairItem.typeOfClaim || 'Own Damage',
+      claimMode: repairItem.claimMode || 'Cashless Claim (Network Garage)',
       accidentPhotos: null,
       firRequired: 'No',
       firCopy: null,
       policeReport: null,
       otherDocuments: null,
+      stage1Completed: false,
+      stage2Completed: false,
+      stage3Completed: false,
       claimIntimatedDate: today(),
       claimIntimationNo: '',
       surveyorName: '',
@@ -1455,7 +1471,14 @@ export const getClaims = async () => {
 export const addClaim = async (claim) => {
   const all = load(KEYS.CLAIMS);
   const now = createTimestamp();
-  const item = { ...claim, timestamp: now, createdAt: now };
+  const item = {
+    stage1Completed: false,
+    stage2Completed: false,
+    stage3Completed: false,
+    ...claim,
+    timestamp: now,
+    createdAt: now
+  };
   all.push(item);
   save(KEYS.CLAIMS, all);
   await sendToSheet({
@@ -1513,6 +1536,8 @@ export const processAccidentClaim = async (claimNo, processData) => {
     'Estimated Claim': all[idx].estimatedClaimAmount || '',
     'Estimated Claim Amount (₹)': all[idx].estimatedClaimAmount || '',
     'Type Of Claim': all[idx].typeOfClaim || 'Own Damage',
+    'Claim Mode': all[idx].claimMode || 'Cashless Claim (Network Garage)',
+    'Expected Settlement Date': all[idx].expectedSettlementDate || '',
     'Policy Validity': all[idx].policyValidity || '',
     'FIR Required?': all[idx].firRequired || 'No',
     'FIR Required': all[idx].firRequired || 'No',

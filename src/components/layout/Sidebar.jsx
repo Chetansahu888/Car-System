@@ -3,13 +3,15 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Car, Shield, Wrench, AlertTriangle,
   Store, CheckCircle, Truck, CreditCard, FileWarning,
-  ChevronLeft, ChevronRight, X, Users, Lock, Eye, Clock
+  ChevronLeft, ChevronRight, X, Users, Lock, Eye, Clock,
+  ChevronDown
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import {
   getRepairs, getVendorOffers, getClaims, getDeliveries,
   getPayments, getCars, getChallans, getFastags, onStoreUpdate, checkHasEmi
 } from '../../store/dataStore';
+import { isStage1Completed, isStage2Completed, isStage3Completed } from '../../utils/claimWorkflow';
 import { useAuth, PAGE_KEYS, ACCESS_LEVELS } from '../../context/AuthContext';
 
 const NAV_GROUPS = [
@@ -32,7 +34,18 @@ const NAV_GROUPS = [
     section: 'Insurance',
     items: [
       { to: '/insurance', label: 'Insurance', icon: Shield, pageKey: PAGE_KEYS.INSURANCE },
-      { to: '/accident-claims', label: 'Accident / Claims', icon: AlertTriangle, badgeKey: 'claims', pageKey: PAGE_KEYS.ACCIDENT_CLAIMS },
+      {
+        to: '/accident-claims',
+        label: 'Accident / Insurance Claims',
+        icon: AlertTriangle,
+        badgeKey: 'claims',
+        pageKey: PAGE_KEYS.ACCIDENT_CLAIMS,
+        children: [
+          { to: '/accident-claims/claim-of-accident', label: 'Claim of accident', stage: 'incident', badgeKey: 'claimsIncident' },
+          { to: '/accident-claims/process-of-claim', label: 'Process of claim', stage: 'process', badgeKey: 'claimsProcess' },
+          { to: '/accident-claims/claim-settlement', label: 'Claim settlement', stage: 'settlement', badgeKey: 'claimsSettled' },
+        ]
+      },
     ],
   },
   {
@@ -56,6 +69,32 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
   const location = useLocation();
   const { currentUser, hasPageAccess, getPageAccessLevel } = useAuth();
   const [counts, setCounts] = useState({});
+  const [openBranches, setOpenBranches] = useState(() => ({
+    '/accident-claims': true
+  }));
+
+  const toggleBranch = (path, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setOpenBranches(prev => ({
+      ...prev,
+      [path]: !prev[path]
+    }));
+  };
+
+  const handleParentClick = (item, e) => {
+    if (item.children && item.children.length > 0) {
+      if (location.pathname.startsWith(item.to) && openBranches[item.to]) {
+        e.preventDefault();
+        setOpenBranches(prev => ({ ...prev, [item.to]: false }));
+        return;
+      }
+      setOpenBranches(prev => ({ ...prev, [item.to]: true }));
+    }
+    setMobileOpen(false);
+  };
 
   useEffect(() => {
     const fetchCounts = async () => {
@@ -71,10 +110,19 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
 
         const activeEmiCount = cars.filter(c => checkHasEmi(c)).length;
 
+        // Categorize claims by stage using 3-stage workflow
+        const incidentPending = claims.filter(c => !isStage1Completed(c)).length;
+        const processPending = claims.filter(c => isStage1Completed(c) && !isStage2Completed(c)).length;
+        const settlementPending = claims.filter(c => isStage2Completed(c) && !isStage3Completed(c)).length;
+        const totalPendingClaims = incidentPending + processPending + settlementPending;
+
         setCounts({
           repairs: repairs.filter(r => r.repairStatus !== 'Payment Completed').length,
           offers: offers.filter(o => o.approvalStatus === 'Pending').length,
-          claims: claims.filter(c => !['Settled', 'Rejected'].includes(c.claimStatus)).length,
+          claims: totalPendingClaims > 0 ? totalPendingClaims : undefined,
+          claimsIncident: incidentPending > 0 ? incidentPending : undefined,
+          claimsProcess: processPending > 0 ? processPending : undefined,
+          claimsSettled: settlementPending > 0 ? settlementPending : undefined,
           approvals: offers.filter(o => o.approvalStatus === 'Pending').length,
           deliveries: deliveries.filter(d => d.deliveryStatus === 'Delivery Pending').length,
           payments: payments.filter(p => p.paymentStatus === 'Payment Pending').length,
@@ -193,21 +241,24 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
               {group.section && !collapsed && (
                 <div className="nav-section-label">{group.section}</div>
               )}
-              {group.items.map(({ to, label, icon: Icon, badgeKey, pageKey }) => {
+              {group.items.map((item) => {
+                const { to, label, icon: Icon, badgeKey, pageKey, children } = item;
                 const isActive = to === '/'
                   ? location.pathname === '/'
                   : location.pathname === to || location.pathname.startsWith(`${to}/`);
                 const count = counts[badgeKey];
                 const accessLevel = getPageAccessLevel(pageKey);
                 const isViewOnly = accessLevel === ACCESS_LEVELS.VIEW && !isAdmin;
+                const hasChildren = Boolean(children && children.length > 0);
+                const isBranchOpen = Boolean(openBranches[to]);
 
                 return (
-                  <div key={to} className="tooltip-wrap">
+                  <div key={to} className="tooltip-wrap" style={{ display: 'flex', flexDirection: 'column' }}>
                     <NavLink
                       to={to}
-                      end
+                      end={!hasChildren}
                       className={({ isActive: routerActive }) => `nav-item ${isActive || routerActive ? 'active' : ''}`}
-                      onClick={() => setMobileOpen(false)}
+                      onClick={(e) => handleParentClick(item, e)}
                     >
                       <div className="nav-item-content">
                         <Icon size={18} className="icon" strokeWidth={isActive ? 2.3 : 1.8} />
@@ -229,11 +280,66 @@ const Sidebar = ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }) => {
                           </div>
                         )}
                       </div>
-                      {!collapsed && count !== undefined && count > 0 && (
-                        <span className="nav-badge-pill">{count}</span>
+                      {!collapsed && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {count !== undefined && count > 0 && (
+                            <span className="nav-badge-pill">{count}</span>
+                          )}
+                          {hasChildren && (
+                            <button
+                              type="button"
+                              onClick={(e) => toggleBranch(to, e)}
+                              className="nav-chevron-btn"
+                              title={isBranchOpen ? "Hide branch" : "Show branch"}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                padding: 2,
+                                cursor: 'pointer',
+                                color: 'inherit',
+                                display: 'flex',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <ChevronDown
+                                size={14}
+                                className="nav-chevron-icon"
+                                style={{
+                                  transform: isBranchOpen ? 'rotate(180deg)' : 'rotate(0deg)'
+                                }}
+                              />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </NavLink>
                     {collapsed && <div className="tooltip">{label} {isViewOnly ? '(View Only)' : ''}</div>}
+
+                    {/* Collapsible Branches */}
+                    {!collapsed && hasChildren && isBranchOpen && (
+                      <div className="nav-branch-list">
+                        {children.map(subItem => {
+                          const isSubActive = location.pathname === subItem.to;
+                          const subCount = counts[subItem.badgeKey];
+                          return (
+                            <NavLink
+                              key={subItem.to}
+                              to={subItem.to}
+                              className={({ isActive: rActive }) => `nav-sub-item ${rActive || isSubActive ? 'active' : ''}`}
+                              onClick={() => setMobileOpen(false)}
+                            >
+                              <div className="nav-sub-item-content">
+                                <span className="nav-sub-bullet" />
+                                <span>{subItem.label}</span>
+                              </div>
+                              {subCount !== undefined && subCount > 0 && (
+                                <span className="nav-sub-badge">{subCount}</span>
+                              )}
+                            </NavLink>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
