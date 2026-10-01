@@ -75,7 +75,7 @@ const RecordDeliveryModal = ({ repair, onClose, onSaved }) => {
 
   return (
     <form onSubmit={handleSubmit} style={{ position: 'relative' }}>
-      <LoadingOverlay isVisible={submitting} message="Submitting Delivery to Google Sheets..." />
+      <LoadingOverlay isVisible={submitting} message="Please Wait" />
 
       {/* Reference Card */}
       <div style={{

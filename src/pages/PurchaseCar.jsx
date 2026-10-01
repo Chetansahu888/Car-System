@@ -1,9 +1,9 @@
 // pages/PurchaseCar.jsx
-import { useState, useEffect, useCallback } from 'react';
-import { Car, Plus, Search, Edit2, Trash2, Eye, X, Filter, CreditCard, User, Shield, ShieldCheck, FileText, CheckCircle, Lock, AlertTriangle, Clock, Calendar, Bell } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Car, Plus, Search, Edit2, Trash2, Eye, X, Filter, CreditCard, User, UserCheck, UserPlus, Shield, ShieldCheck, FileText, CheckCircle, Lock, AlertTriangle, Clock, Calendar, Bell, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getCars, addCar, updateCar, deleteCar, getInsurance, renewInsurance, getMasterFirmNames, onStoreUpdate, checkHasEmi } from '../store/dataStore';
-import { generateVehicleId } from '../utils/idGenerator';
+import { getCars, addCar, updateCar, deleteCar, getInsurance, renewInsurance, syncEmiToSheet, getMasterFirmNames, getMasterEmployees, onStoreUpdate, checkHasEmi } from '../store/dataStore';
+import { generateVehicleId, generateEmiNo, generateInsuranceId } from '../utils/idGenerator';
 import { formatDate, today, calcInsuranceRenewal, toInputDate, calcEmiDetails } from '../utils/dateUtils';
 import { validateForm, required, phone, positiveNumber } from '../utils/validators';
 import { FUEL_TYPES, ITEMS_PER_PAGE } from '../constants';
@@ -21,6 +21,7 @@ import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 import { openDocument } from '../utils/fileUtils';
 
 const EMPTY_FORM = {
+  emiNo: '',
   firmName: '', carName: '', dateOfPurchase: '', modelNo: '', companyPurchasedFrom: '',
   fuelType: '', registrationNo: '', chassisNo: '', engineNo: '',
   hypothecationBank: '', loanAmount: '', emiStartDate: '', lastEmiDate: '', dateOfReleaseHypothecation: '',
@@ -29,7 +30,8 @@ const EMPTY_FORM = {
   companyMobileNo: '', servicePersonName: '', servicePersonMobileNo: '',
   copyOfInsurance: null, copyOfRegistration: null,
   nameOfCompany: '', nameOfOwner: '', agentName: '',
-  dateOfInsurance: '', pollutionDate: ''
+  dateOfInsurance: '', pollutionDate: '',
+  vehicleAssignTo: '', employeeId: '', assigneeMobileNo: ''
 };
 
 const FORM_RULES = {
@@ -40,6 +42,7 @@ const FORM_RULES = {
 };
 
 const EMPTY_INSURANCE = {
+  insuranceId: '',
   date: '',
   nameOfCompany: '',
   agentName: '',
@@ -73,6 +76,7 @@ const EMPTY_INSURANCE = {
   personalBelonging: false,
   roadsideAssistance: false,
   keyReplacement: false,
+  returnToInvoice: false,
   emergencyTransportHotel: false,
   claimedLastYear: 'No',
   policyInclusiveOfNcb: 'No',
@@ -100,12 +104,347 @@ const FormField = ({ label, required: req, error, children }) => (
   </div>
 );
 
+const EmployeeCombobox = ({ value, employees = [], onChange, onEmployeeSelect }) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value || '');
+  const [customList, setCustomList] = useState([]);
+  const [isAddingNew, setIsAddingNew] = useState(false);
+  const [newName, setNewName] = useState('');
+  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    setQuery(value || '');
+  }, [value]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+        setIsAddingNew(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const allEmployees = [...customList, ...employees];
+  const cleanQ = (query || '').trim();
+  const qLower = cleanQ.toLowerCase();
+
+  const filtered = allEmployees.filter(emp => {
+    if (!qLower) return true;
+    return (emp.name && emp.name.toLowerCase().includes(qLower)) ||
+           (emp.code && emp.code.toLowerCase().includes(qLower));
+  });
+
+  const hasExactMatch = allEmployees.some(emp => emp.name && emp.name.toLowerCase().trim() === qLower);
+  const canQuickAdd = cleanQ.length > 0 && !hasExactMatch;
+
+  const handleSelect = (emp) => {
+    setQuery(emp.name);
+    setOpen(false);
+    setIsAddingNew(false);
+    onEmployeeSelect(emp);
+  };
+
+  const handleQuickAddTyped = () => {
+    if (!cleanQ) return;
+    const newEmp = { name: cleanQ, code: '', isCustom: true };
+    setCustomList(prev => [newEmp, ...prev.filter(p => p.name.toLowerCase() !== cleanQ.toLowerCase())]);
+    setQuery(cleanQ);
+    setOpen(false);
+    setIsAddingNew(false);
+    onEmployeeSelect(newEmp);
+    toast.success(`Assigned to "${cleanQ}"`);
+  };
+
+  const handleSaveCustom = (e) => {
+    e?.preventDefault?.();
+    const trimmedName = (newName || cleanQ).trim();
+    if (!trimmedName) {
+      toast.error('Please enter name');
+      return;
+    }
+    const newEmp = {
+      name: trimmedName,
+      code: '',
+      isCustom: true
+    };
+    setCustomList(prev => [newEmp, ...prev.filter(p => p.name.toLowerCase() !== trimmedName.toLowerCase())]);
+    setQuery(trimmedName);
+    setIsAddingNew(false);
+    setOpen(false);
+    onEmployeeSelect(newEmp);
+    setNewName('');
+    toast.success(`Assigned to "${trimmedName}"`);
+  };
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setQuery(val);
+    onChange(val);
+    setOpen(true);
+    const matched = allEmployees.find(emp => emp.name && emp.name.toLowerCase() === val.toLowerCase().trim());
+    if (matched) {
+      onEmployeeSelect(matched);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (canQuickAdd) {
+        handleQuickAddTyped();
+      } else if (filtered.length > 0) {
+        handleSelect(filtered[0]);
+      }
+    }
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <input
+          ref={inputRef}
+          type="text"
+          className="form-input"
+          value={query}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          onFocus={() => setOpen(true)}
+          placeholder="Search name or type custom name..."
+          style={{ paddingRight: 62 }}
+        />
+        <div style={{ position: 'absolute', right: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+          {query && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                onChange('');
+                onEmployeeSelect({ name: '', code: '' });
+              }}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                color: '#94a3b8',
+                padding: 3,
+                display: 'flex',
+                alignItems: 'center',
+                borderRadius: 4
+              }}
+              title="Clear"
+            >
+              <X size={14} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setOpen(o => !o)}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              color: '#64748b',
+              padding: 3,
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: 4
+            }}
+            title="Toggle list"
+          >
+            <ChevronDown size={16} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 4px)',
+          left: 0,
+          right: 0,
+          background: '#ffffff',
+          border: '1.5px solid #cbd5e1',
+          borderRadius: 12,
+          boxShadow: '0 12px 28px rgba(0, 0, 0, 0.12)',
+          maxHeight: 280,
+          overflowY: 'auto',
+          zIndex: 1000,
+          padding: '8px'
+        }}>
+          {/* Top Add Option - Only Name, right at the top */}
+          {isAddingNew ? (
+            <div style={{
+              background: '#f0fdf4',
+              border: '1.5px solid #059669',
+              borderRadius: 8,
+              padding: '10px',
+              marginBottom: 8
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#065f46', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <UserPlus size={14} /> Add Name
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsAddingNew(false)}
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b', padding: 2 }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  type="text"
+                  placeholder="Enter Name *"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveCustom();
+                    }
+                  }}
+                  className="form-input"
+                  style={{ fontSize: 12, padding: '6px 10px', flex: 1 }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveCustom}
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: 12,
+                    border: 'none',
+                    borderRadius: 6,
+                    background: '#059669',
+                    color: '#fff',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  <Plus size={13} /> Add
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                if (cleanQ && !hasExactMatch) {
+                  handleQuickAddTyped();
+                } else {
+                  setNewName(cleanQ);
+                  setIsAddingNew(true);
+                }
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                marginBottom: 8,
+                borderRadius: 8,
+                background: cleanQ && !hasExactMatch ? '#f0fdf4' : '#f8fafc',
+                border: cleanQ && !hasExactMatch ? '1.5px dashed #86efac' : '1px dashed #cbd5e1',
+                cursor: 'pointer',
+                color: cleanQ && !hasExactMatch ? '#15803d' : '#334155',
+                transition: 'all 0.15s'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#ecfdf5'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = cleanQ && !hasExactMatch ? '#f0fdf4' : '#f8fafc'; }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <UserPlus size={15} color="#059669" />
+                <span style={{ fontWeight: 700, fontSize: 12, color: '#0f172a' }}>
+                  {cleanQ && !hasExactMatch ? `+ Add "${cleanQ}"` : '+ Add New Name'}
+                </span>
+              </div>
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                background: '#059669',
+                color: '#ffffff',
+                padding: '2px 8px',
+                borderRadius: 5
+              }}>
+                + Add
+              </span>
+            </div>
+          )}
+
+          {/* Filtered Employees list */}
+          {filtered.length === 0 ? (
+            <div style={{ padding: '12px 14px', fontSize: 13, color: '#94a3b8', textAlign: 'center' }}>
+              No employees found
+            </div>
+          ) : (
+            filtered.map((emp, i) => (
+              <div
+                key={`${emp.code || ''}_${emp.name}_${i}`}
+                onClick={() => handleSelect(emp)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: '#1e293b',
+                  background: emp.name === value ? '#ecfdf5' : 'transparent',
+                  transition: 'background 0.15s'
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = emp.name === value ? '#ecfdf5' : 'transparent'; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <User size={14} color={emp.isCustom ? '#0284c7' : '#059669'} />
+                  <span>{emp.name}</span>
+                  {emp.isCustom && (
+                    <span style={{ fontSize: 10, background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                      Custom
+                    </span>
+                  )}
+                </div>
+                {emp.code ? (
+                  <span style={{
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    fontWeight: 700,
+                    color: '#2563eb',
+                    background: '#eff6ff',
+                    padding: '2px 7px',
+                    borderRadius: 5,
+                    border: '1px solid #bfdbfe'
+                  }}>
+                    {emp.code}
+                  </span>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CarForm = ({ car, cars, onClose, onSaved }) => {
   const isEdit = !!car;
   const [form, setForm] = useState(isEdit ? { ...EMPTY_FORM, ...car } : { ...EMPTY_FORM });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [firmNames, setFirmNames] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [hasInsurance, setHasInsurance] = useState(false);
   const [insForm, setInsForm] = useState({ ...EMPTY_INSURANCE });
   const [hasEmi, setHasEmi] = useState(isEdit ? checkHasEmi(car) : false);
@@ -117,11 +456,12 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
   }, [isEdit, car]);
 
   useEffect(() => {
-    const fetchFirms = async () => {
-      const firms = await getMasterFirmNames();
+    const fetchMasters = async () => {
+      const [firms, emps] = await Promise.all([getMasterFirmNames(), getMasterEmployees()]);
       setFirmNames(firms);
+      setEmployees(emps);
     };
-    fetchFirms();
+    fetchMasters();
 
     const fetchExistingInsurance = async () => {
       if (isEdit && car?.vehicleId) {
@@ -131,6 +471,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
           if (existing) {
             setHasInsurance(true);
             setInsForm({
+              insuranceId: existing.insuranceId || '',
               date: existing.date || car?.dateOfInsurance || '',
               nameOfCompany: existing.nameOfCompany || car?.nameOfCompany || '',
               agentName: existing.agentName || car?.agentName || '',
@@ -158,12 +499,13 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
               taxAmount: existing.taxAmount || '',
               totalPremiumAmount: existing.totalPremiumAmount || '',
               premiumOfNcb: existing.premiumOfNcb || '',
-              depreciationReimbursement: !!existing.depreciationReimbursement,
-              engineSecure: !!existing.engineSecure,
-              consumableExpenses: !!existing.consumableExpenses,
-              personalBelonging: !!existing.personalBelonging,
-              roadsideAssistance: !!existing.roadsideAssistance,
-              keyReplacement: !!existing.keyReplacement,
+              depreciationReimbursement: !!(existing.depreciationReimbursement || existing.zd),
+              engineSecure: !!(existing.engineSecure || existing.ep),
+              consumableExpenses: !!(existing.consumableExpenses || existing.cm),
+              personalBelonging: !!(existing.personalBelonging || existing.pb),
+              roadsideAssistance: !!(existing.roadsideAssistance || existing.rsa),
+              keyReplacement: !!(existing.keyReplacement || existing.kp),
+              returnToInvoice: !!(existing.returnToInvoice || existing.rti),
               emergencyTransportHotel: !!existing.emergencyTransportHotel,
               claimedLastYear: existing.claimedLastYear || 'No',
               policyInclusiveOfNcb: existing.policyInclusiveOfNcb || 'No',
@@ -269,6 +611,9 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
       if (hasEmi) {
         processedForm.hasEmi = true;
         processedForm.emiStatus = 'Yes';
+        if (!processedForm.emiNo) {
+          processedForm.emiNo = form.emiNo || generateEmiNo(cars);
+        }
         const emiCalc = calcEmiDetails(processedForm);
         processedForm.paidEmiAmount = processedForm.paidEmiAmount || (emiCalc ? String(emiCalc.paidAmount) : '');
         processedForm.remainingLoanAmount = emiCalc ? String(emiCalc.remainingAmount) : '';
@@ -322,24 +667,33 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
       let finalVehicleId = car?.vehicleId;
       if (isEdit) {
         await updateCar(car.vehicleId, { ...processedForm, updatedAt: new Date().toISOString() });
-        toast.success('Vehicle updated successfully');
+        toast.success('Vehicle updated in Purchase Car Details');
       } else {
         finalVehicleId = generateVehicleId(cars);
         await addCar({ ...processedForm, vehicleId: finalVehicleId, createdAt: new Date().toISOString() });
-        toast.success(`Vehicle ${finalVehicleId} added successfully`);
+        toast.success(`Vehicle ${finalVehicleId} saved to Purchase Car Details`);
+      }
+
+      if (hasEmi) {
+        await syncEmiToSheet({ ...processedForm, vehicleId: finalVehicleId });
+        toast.success(`EMI record (${processedForm.emiNo}) saved to EMI On Vehicle sheet`);
       }
 
       if (hasInsurance) {
+        const allIns = await getInsurance();
+        const existingIns = allIns.find(i => (finalVehicleId && i.vehicleId === finalVehicleId) || (insForm.insuranceId && i.insuranceId === insForm.insuranceId));
+        const insuranceId = existingIns?.insuranceId || insForm.insuranceId || generateInsuranceId(allIns);
         const renewal = calcInsuranceRenewal(insForm.date);
         await renewInsurance(finalVehicleId, {
           ...insForm,
+          insuranceId,
           vehicleId: finalVehicleId,
           carName: processedForm.carName,
           validityDate: renewal ? toInputDate(renewal) : '',
           renewalDate: renewal ? toInputDate(renewal) : '',
           timestamp: new Date().toISOString(),
         });
-        toast.success('Insurance record saved successfully');
+        toast.success(`Insurance record (${insuranceId}) saved to Insurance Of Vehicle sheet`);
       }
 
       onSaved();
@@ -352,7 +706,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
 
   return (
     <form onSubmit={handleSubmit} style={{ position: 'relative' }}>
-      <LoadingOverlay isVisible={saving} message={isEdit ? "Updating Vehicle in Google Sheet..." : "Saving Vehicle to Google Sheet..."} />
+      <LoadingOverlay isVisible={saving} message="Please Wait" />
       {isEdit && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 12, background: '#ecfdf5', border: '1px solid #d1fae5', marginBottom: 24, fontSize: 13.5, color: '#059669', fontWeight: 700 }}>
           🚗 Vehicle ID: <span style={{ color: '#0f172a' }}>{car.vehicleId}</span>
@@ -458,7 +812,22 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                   <div style={{ fontSize: 12, color: '#64748b' }}>Calculate loan amount, monthly installment, remaining balance & due reminders.</div>
                 </div>
               </div>
-              <Badge label="EMI Enabled" variant="success" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  letterSpacing: '0.5px',
+                  padding: '5px 12px',
+                  borderRadius: 8,
+                  background: '#ecfdf5',
+                  color: '#059669',
+                  border: '1.5px solid #a7f3d0',
+                  boxShadow: '0 1px 3px rgba(5, 150, 105, 0.1)'
+                }}>
+                  EMI No: {form.emiNo || generateEmiNo(cars)}
+                </span>
+                <Badge label="EMI Enabled" variant="success" />
+              </div>
             </div>
 
             {/* Live Calculation & Payment Reminder Box */}
@@ -621,6 +990,43 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
         </FormField>
         <FormField label="Service Person Mobile No.">
           <input className="form-input" value={form.servicePersonMobileNo} onChange={e => set('servicePersonMobileNo', e.target.value)} placeholder="10-digit number" />
+        </FormField>
+      </div>
+
+      {/* Vehicle Assign To */}
+      <div className="form-section-header">
+        <div className="form-section-icon"><UserCheck size={18} strokeWidth={2.2} /></div>
+        <div className="form-section-title">Vehicle Assign To</div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 28 }}>
+        <FormField label="Vehicle Assign To">
+          <EmployeeCombobox
+            value={form.vehicleAssignTo}
+            employees={employees}
+            onChange={(name) => set('vehicleAssignTo', name)}
+            onEmployeeSelect={(emp) => {
+              set('vehicleAssignTo', emp.name || '');
+              if (emp.code) {
+                set('employeeId', emp.code);
+              }
+            }}
+          />
+        </FormField>
+        <FormField label="Employee ID">
+          <input
+            className="form-input"
+            value={form.employeeId}
+            onChange={e => set('employeeId', e.target.value)}
+            placeholder="e.g. PMMPL-1"
+          />
+        </FormField>
+        <FormField label="Assignee Mobile No.">
+          <input
+            className="form-input"
+            value={form.assigneeMobileNo}
+            onChange={e => set('assigneeMobileNo', e.target.value)}
+            placeholder="10-digit number"
+          />
         </FormField>
       </div>
 
@@ -873,12 +1279,13 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                     border: '1px solid #e2e8f0'
                   }}>
                     {[
-                      ['Depreciation Reimbursement (Zero Dep)', 'depreciationReimbursement'],
-                      ['Engine Secure', 'engineSecure'],
-                      ['Consumable Expenses', 'consumableExpenses'],
-                      ['Loss of Personal Belonging', 'personalBelonging'],
+                      ['ZD (Zero Depreciation)', 'depreciationReimbursement'],
+                      ['EP (Engine Protect)', 'engineSecure'],
+                      ['CM (Consumable Expenses)', 'consumableExpenses'],
+                      ['PB (Loss of Personal Belonging)', 'personalBelonging'],
+                      ['KP (Key Protect)', 'keyReplacement'],
+                      ['RTI (Return to Invoice)', 'returnToInvoice'],
                       ['Roadside Assistance (RSA)', 'roadsideAssistance'],
-                      ['Key Replacement', 'keyReplacement'],
                       ['Emergency Transport & Hotel', 'emergencyTransportHotel'],
                     ].map(([label, field]) => (
                       <CheckField
@@ -1119,6 +1526,7 @@ const ViewCar = ({ car, insurance }) => {
     ['Company Mobile', car.companyMobileNo], ['Service Person', car.servicePersonName],
     ['Service Mobile', car.servicePersonMobileNo], ['Name of Company', car.nameOfCompany],
     ['Name of Owner', car.nameOfOwner], ['Agent Name', car.agentName],
+    ['Vehicle Assign To', car.vehicleAssignTo], ['Employee ID', car.employeeId], ['Assignee Mobile', car.assigneeMobileNo],
     ['Date of Insurance', formatDate(car.dateOfInsurance)], ['Pollution Date', formatDate(car.pollutionDate)],
   ];
 
@@ -1491,7 +1899,8 @@ const PurchaseCar = () => {
     const q = search.toLowerCase();
     const match = !q || c.carName?.toLowerCase().includes(q) || c.vehicleId?.toLowerCase().includes(q)
       || c.registrationNo?.toLowerCase().includes(q) || c.modelNo?.toLowerCase().includes(q)
-      || c.firmName?.toLowerCase().includes(q);
+      || c.firmName?.toLowerCase().includes(q)
+      || c.vehicleAssignTo?.toLowerCase().includes(q) || c.employeeId?.toLowerCase().includes(q);
     const fuel = !fuelFilter || c.fuelType === fuelFilter;
     return match && fuel;
   });
@@ -1577,6 +1986,7 @@ const PurchaseCar = () => {
                   <th>Purchase Date</th>
                   <th>Value (₹)</th>
                   <th>Owner</th>
+                  <th>Vehicle Assign To</th>
                   <th style={{ textAlign: 'center' }}>EMI</th>
                   <th>Insurance</th>
                   <th>Insurance Date</th>
@@ -1598,6 +2008,22 @@ const PurchaseCar = () => {
                       <td>{formatDate(car.dateOfPurchase)}</td>
                       <td>{car.valueOfCar ? `₹${Number(car.valueOfCar).toLocaleString('en-IN')}` : '—'}</td>
                       <td>{car.nameOfOwner || '—'}</td>
+                      <td>
+                        {car.vehicleAssignTo ? (
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <UserCheck size={13} color="#059669" /> {car.vehicleAssignTo}
+                            </div>
+                            {car.employeeId && (
+                              <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#2563eb', background: '#eff6ff', padding: '1px 6px', borderRadius: 4, border: '1px solid #bfdbfe', display: 'inline-block', marginTop: 2 }}>
+                                {car.employeeId}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: 12 }}>Unassigned</span>
+                        )}
+                      </td>
                       <td style={{ textAlign: 'center' }}>
                         {hasEmi ? (() => {
                           const emiData = calcEmiDetails(car);

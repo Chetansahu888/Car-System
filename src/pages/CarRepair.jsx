@@ -97,7 +97,7 @@ const RepairForm = ({ repair, cars, repairs, claims = [], onClose, onSaved }) =>
 
   return (
     <form onSubmit={handleSubmit} style={{ position: 'relative' }}>
-      <LoadingOverlay isVisible={saving} message={isEdit ? "Updating Repair in Google Sheet..." : "Saving Repair to Google Sheet..."} />
+      <LoadingOverlay isVisible={saving} message="Please Wait" />
       <div className="form-section-header">
         <div className="form-section-icon"><Wrench size={18} strokeWidth={2.2} /></div>
         <div className="form-section-title">Car Repair Entry Details</div>

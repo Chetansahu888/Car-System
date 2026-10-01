@@ -36,7 +36,7 @@ const EMPTY_FORM = {
   idvValue: '', totalPremiumToBePaid: '', basicPremium: '', thirdPartyPremium: '',
   addOnPremium: '', depreciationReimbursement: false, engineSecure: false,
   consumableExpenses: false, personalBelonging: false, roadsideAssistance: false,
-  keyReplacement: false, emergencyTransportHotel: false,
+  keyReplacement: false, returnToInvoice: false, emergencyTransportHotel: false,
   taxAmount: '', totalPremiumAmount: '',
   claimedLastYear: 'No', policyInclusiveOfNcb: 'No', premiumOfNcb: '',
   cashlessPolicy: 'Yes',
@@ -338,12 +338,13 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
               border: '1px solid #e2e8f0'
             }}>
               {[
-                ['Depreciation Reimbursement (Zero Dep)', 'depreciationReimbursement'],
-                ['Engine Secure', 'engineSecure'],
-                ['Consumable Expenses', 'consumableExpenses'],
-                ['Loss of Personal Belonging', 'personalBelonging'],
+                ['ZD (Zero Depreciation)', 'depreciationReimbursement'],
+                ['EP (Engine Protect)', 'engineSecure'],
+                ['CM (Consumable Expenses)', 'consumableExpenses'],
+                ['PB (Loss of Personal Belonging)', 'personalBelonging'],
+                ['KP (Key Protect)', 'keyReplacement'],
+                ['RTI (Return to Invoice)', 'returnToInvoice'],
                 ['Roadside Assistance (RSA)', 'roadsideAssistance'],
-                ['Key Replacement', 'keyReplacement'],
                 ['Emergency Transport & Hotel', 'emergencyTransportHotel'],
               ].map(([label, field]) => (
                 <CheckField
@@ -596,13 +597,43 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
 
 // ─── Renewal Update Modal Form ────────────────────────────────────────────────
 const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
+  const existingOdEnd = existingIns?.odEndDate || existingIns?.renewalDate || existingIns?.validityDate || '';
+  const existingTpEnd = existingIns?.tpEndDate || '';
+  const existingPaEnd = existingIns?.paEndDate || '';
+
+  const getCoverStatus = (endDateStr) => {
+    if (!endDateStr) return { isDue: true, days: null, text: 'No Date Recorded (Due for Renewal)' };
+    const days = daysUntil(endDateStr);
+    if (days === null || isNaN(days)) return { isDue: true, days: null, text: 'Due for Renewal' };
+    if (days < 0) return { isDue: true, days, text: `Expired (${Math.abs(days)} days ago)` };
+    if (days <= 30) return { isDue: true, days, text: `Expiring Soon (${days} days left)` };
+    return { isDue: false, days, text: `Active & Valid (${days} days remaining)` };
+  };
+
+  const odStatus = getCoverStatus(existingOdEnd);
+  const tpStatus = getCoverStatus(existingTpEnd);
+  const paStatus = getCoverStatus(existingPaEnd);
+
+  // By default, open the form section ONLY IF the renewal date has arrived (isDue === true)
+  const [renewOd, setRenewOd] = useState(odStatus.isDue);
+  const [renewTp, setRenewTp] = useState(tpStatus.isDue);
+  const [renewPa, setRenewPa] = useState(paStatus.isDue);
+
   const [form, setForm] = useState({
     date: '',
     nameOfCompany: existingIns?.nameOfCompany || '',
+    agentName: existingIns?.agentName || '',
+    
+    // 1. Own Damage
+    hasOwnDamage: existingIns?.hasOwnDamage || 'Yes',
+    odStartDate: '',
+    odEndDate: '',
     idvValue: existingIns?.idvValue || '',
-    totalPremiumToBePaid: existingIns?.totalPremiumToBePaid || '',
     basicPremium: existingIns?.basicPremium || '',
-    thirdPartyPremium: existingIns?.thirdPartyPremium || '',
+    claimedLastYear: 'No',
+    policyInclusiveOfNcb: existingIns?.policyInclusiveOfNcb || 'Yes',
+    premiumOfNcb: existingIns?.premiumOfNcb || '',
+    cashlessPolicy: existingIns?.cashlessPolicy || 'Yes',
     addOnPremium: existingIns?.addOnPremium || '',
     depreciationReimbursement: existingIns?.depreciationReimbursement || false,
     engineSecure: existingIns?.engineSecure || false,
@@ -610,42 +641,87 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
     personalBelonging: existingIns?.personalBelonging || false,
     roadsideAssistance: existingIns?.roadsideAssistance ?? true,
     keyReplacement: existingIns?.keyReplacement || false,
+    returnToInvoice: existingIns?.returnToInvoice || false,
     emergencyTransportHotel: existingIns?.emergencyTransportHotel || false,
-    taxAmount: existingIns?.taxAmount || '',
-    totalPremiumAmount: existingIns?.totalPremiumAmount || '',
-    claimedLastYear: 'No',
-    policyInclusiveOfNcb: existingIns?.policyInclusiveOfNcb || 'Yes',
-    premiumOfNcb: existingIns?.premiumOfNcb || '',
-    cashlessPolicy: 'Yes',
+
+    // 2. Third Party
+    hasThirdParty: existingIns?.hasThirdParty || 'Yes',
+    tpPolicyNo: existingIns?.tpPolicyNo || '',
+    tpStartDate: '',
+    tpEndDate: '',
+    tppdLimit: existingIns?.tppdLimit || '750000',
+    thirdPartyPremium: existingIns?.thirdPartyPremium || '',
+
+    // 3. Personal Accident
+    hasPaCover: existingIns?.hasPaCover || 'Yes',
+    paCoverType: existingIns?.paCoverType || 'Owner-Driver CPA (₹15 Lakhs)',
+    paSumInsured: existingIns?.paSumInsured || '1500000',
+    paPremium: existingIns?.paPremium || '',
+    paStartDate: '',
+    paEndDate: '',
+    paNomineeName: existingIns?.paNomineeName || '',
+    paNomineeRelation: existingIns?.paNomineeRelation || '',
+
+    // 4. Totals
+    taxAmount: '0',
+    totalPremiumAmount: '0',
+    totalPremiumToBePaid: '0',
   });
   const [saving, setSaving] = useState(false);
+
+  const recomputeTotals = (currentForm, isOd, isTp, isPa) => {
+    const od = (isOd && currentForm.hasOwnDamage !== 'No') ? (Number(currentForm.basicPremium) || 0) : 0;
+    const addOn = (isOd && currentForm.hasOwnDamage !== 'No') ? (Number(currentForm.addOnPremium) || 0) : 0;
+    const ncb = (isOd && currentForm.hasOwnDamage !== 'No') ? (Number(currentForm.premiumOfNcb) || 0) : 0;
+    const tp = (isTp && currentForm.hasThirdParty !== 'No') ? (Number(currentForm.thirdPartyPremium) || 0) : 0;
+    const pa = (isPa && currentForm.hasPaCover !== 'No') ? (Number(currentForm.paPremium) || 0) : 0;
+
+    const net = Math.max(0, od + addOn - ncb) + tp + pa;
+    if (net > 0) {
+      const gst = Math.round(net * 0.18);
+      const total = net + gst;
+      return { taxAmount: String(gst), totalPremiumAmount: String(total), totalPremiumToBePaid: String(total) };
+    }
+    return { taxAmount: '0', totalPremiumAmount: '0', totalPremiumToBePaid: '0' };
+  };
+
   const set = (field, val) => {
     setForm(f => {
       const updated = { ...f, [field]: val };
-      const isCalcField = ['basicPremium', 'thirdPartyPremium', 'addOnPremium', 'premiumOfNcb'].includes(field);
-      if (isCalcField) {
-        const od = Number(updated.basicPremium) || 0;
-        const addOn = Number(updated.addOnPremium) || 0;
-        const ncb = Number(updated.premiumOfNcb) || 0;
-        const tp = Number(updated.thirdPartyPremium) || 0;
-        const net = Math.max(0, od + addOn - ncb) + tp;
-        if (net > 0) {
-          const gst = Math.round(net * 0.18);
-          const total = net + gst;
-          updated.taxAmount = String(gst);
-          updated.totalPremiumAmount = String(total);
-          updated.totalPremiumToBePaid = String(total);
-        } else {
-          updated.taxAmount = '0';
-          updated.totalPremiumAmount = '0';
-          updated.totalPremiumToBePaid = '0';
+
+      // Auto-set sub-dates when main renewal start date is picked
+      if (field === 'date') {
+        const ren = val ? calcInsuranceRenewal(val) : null;
+        const renStr = ren ? toInputDate(ren) : '';
+        if (renewOd) {
+          if (!updated.odStartDate) updated.odStartDate = val;
+          if (!updated.odEndDate) updated.odEndDate = renStr;
         }
+        if (renewTp) {
+          if (!updated.tpStartDate) updated.tpStartDate = val;
+          if (!updated.tpEndDate) updated.tpEndDate = renStr;
+        }
+        if (renewPa) {
+          if (!updated.paStartDate) updated.paStartDate = val;
+          if (!updated.paEndDate) updated.paEndDate = renStr;
+        }
+      }
+
+      const isCalcField = [
+        'basicPremium', 'thirdPartyPremium', 'addOnPremium', 'premiumOfNcb',
+        'paPremium', 'hasOwnDamage', 'hasThirdParty', 'hasPaCover'
+      ].includes(field);
+
+      if (isCalcField) {
+        const totals = recomputeTotals(updated, renewOd, renewTp, renewPa);
+        return { ...updated, ...totals };
       } else if (field === 'taxAmount') {
-        const od = Number(updated.basicPremium) || 0;
-        const addOn = Number(updated.addOnPremium) || 0;
-        const ncb = Number(updated.premiumOfNcb) || 0;
-        const tp = Number(updated.thirdPartyPremium) || 0;
-        const net = Math.max(0, od + addOn - ncb) + tp;
+        const od = (renewOd && updated.hasOwnDamage !== 'No') ? (Number(updated.basicPremium) || 0) : 0;
+        const addOn = (renewOd && updated.hasOwnDamage !== 'No') ? (Number(updated.addOnPremium) || 0) : 0;
+        const ncb = (renewOd && updated.hasOwnDamage !== 'No') ? (Number(updated.premiumOfNcb) || 0) : 0;
+        const tp = (renewTp && updated.hasThirdParty !== 'No') ? (Number(updated.thirdPartyPremium) || 0) : 0;
+        const pa = (renewPa && updated.hasPaCover !== 'No') ? (Number(updated.paPremium) || 0) : 0;
+        const net = Math.max(0, od + addOn - ncb) + tp + pa;
         const gst = Number(val) || 0;
         const total = net + gst;
         updated.totalPremiumAmount = String(total);
@@ -655,20 +731,69 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
     });
   };
 
+  const toggleSection = (section, enable) => {
+    let nextOd = renewOd;
+    let nextTp = renewTp;
+    let nextPa = renewPa;
+    if (section === 'od') { setRenewOd(enable); nextOd = enable; }
+    if (section === 'tp') { setRenewTp(enable); nextTp = enable; }
+    if (section === 'pa') { setRenewPa(enable); nextPa = enable; }
+
+    setForm(f => {
+      const totals = recomputeTotals(f, nextOd, nextTp, nextPa);
+      return { ...f, ...totals };
+    });
+  };
+
   const nextRenewal = form.date ? calcInsuranceRenewal(form.date) : null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.date) { toast.error('Please enter renewal policy start date'); return; }
     if (!form.nameOfCompany) { toast.error('Please enter insurance company name'); return; }
+    if (!renewOd && !renewTp && !renewPa) {
+      toast.error('No cover is selected for renewal. Please choose at least one cover.');
+      return;
+    }
+
     setSaving(true);
     try {
-      await renewInsurance(car.vehicleId, {
+      const nextRenStr = nextRenewal ? toInputDate(nextRenewal) : '';
+
+      const payload = {
+        ...existingIns,
         ...form,
+        vehicleId: car.vehicleId,
         carName: car.carName,
-        validityDate: nextRenewal ? toInputDate(nextRenewal) : '',
-        renewalDate: nextRenewal ? toInputDate(nextRenewal) : '',
-      });
+
+        // 1. OD Fields
+        hasOwnDamage: renewOd ? form.hasOwnDamage : (existingIns?.hasOwnDamage || 'No'),
+        odStartDate: renewOd ? form.odStartDate : (existingIns?.odStartDate || ''),
+        odEndDate: renewOd ? (form.odEndDate || nextRenStr) : (existingIns?.odEndDate || ''),
+        basicPremium: renewOd ? form.basicPremium : (existingIns?.basicPremium || ''),
+        addOnPremium: renewOd ? form.addOnPremium : (existingIns?.addOnPremium || ''),
+        idvValue: renewOd ? form.idvValue : (existingIns?.idvValue || ''),
+
+        // 2. TP Fields
+        hasThirdParty: renewTp ? form.hasThirdParty : (existingIns?.hasThirdParty || 'No'),
+        tpStartDate: renewTp ? form.tpStartDate : (existingIns?.tpStartDate || ''),
+        tpEndDate: renewTp ? (form.tpEndDate || nextRenStr) : (existingIns?.tpEndDate || ''),
+        thirdPartyPremium: renewTp ? form.thirdPartyPremium : (existingIns?.thirdPartyPremium || ''),
+        tpPolicyNo: renewTp ? form.tpPolicyNo : (existingIns?.tpPolicyNo || ''),
+        tppdLimit: renewTp ? form.tppdLimit : (existingIns?.tppdLimit || '750000'),
+
+        // 3. PA Fields
+        hasPaCover: renewPa ? form.hasPaCover : (existingIns?.hasPaCover || 'No'),
+        paStartDate: renewPa ? form.paStartDate : (existingIns?.paStartDate || ''),
+        paEndDate: renewPa ? (form.paEndDate || nextRenStr) : (existingIns?.paEndDate || ''),
+        paPremium: renewPa ? form.paPremium : (existingIns?.paPremium || ''),
+
+        // Master renewal tracking date: set to latest renewed date or earliest upcoming renewal
+        validityDate: renewOd ? (form.odEndDate || nextRenStr) : (renewTp ? (form.tpEndDate || nextRenStr) : nextRenStr),
+        renewalDate: renewOd ? (form.odEndDate || nextRenStr) : (renewTp ? (form.tpEndDate || nextRenStr) : nextRenStr),
+      };
+
+      await renewInsurance(car.vehicleId, payload);
       toast.success(`Insurance for ${car.carName} (${car.vehicleId}) renewed successfully!`);
       onSaved();
     } catch (err) {
@@ -678,10 +803,14 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
     }
   };
 
-  const renewNet = Math.max(0, (Number(form.basicPremium) || 0) + (Number(form.addOnPremium) || 0) - (Number(form.premiumOfNcb) || 0)) + (Number(form.thirdPartyPremium) || 0);
+  const odNet = (renewOd && form.hasOwnDamage !== 'No') ? Math.max(0, (Number(form.basicPremium) || 0) + (Number(form.addOnPremium) || 0) - (Number(form.premiumOfNcb) || 0)) : 0;
+  const tpNet = (renewTp && form.hasThirdParty !== 'No') ? (Number(form.thirdPartyPremium) || 0) : 0;
+  const paNet = (renewPa && form.hasPaCover !== 'No') ? (Number(form.paPremium) || 0) : 0;
+  const renewNet = odNet + tpNet + paNet;
 
   return (
     <form onSubmit={handleSubmit}>
+      {/* Vehicle Info Header */}
       <div style={{ padding: '14px 18px', background: '#ecfdf5', borderRadius: 14, border: '1px solid #a7f3d0', marginBottom: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div style={{ fontSize: 11.5, color: '#059669', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5 }}>Vehicle To Renew</div>
@@ -696,16 +825,17 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
         )}
       </div>
 
+      {/* Main Schedule & Company */}
       <div className="form-section-header">
         <div className="form-section-icon"><Calendar size={18} strokeWidth={2.2} /></div>
         <div className="form-section-title">New Policy Renewal Schedule</div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
         <div className="form-group">
           <label className="form-label">New Policy Start Date <span className="required">*</span></label>
           <input type="date" className="form-input" value={form.date} onChange={e => set('date', e.target.value)} />
           {nextRenewal && (
-            <div style={{ fontSize: 12.5, color: '#059669', fontWeight: 700, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div style={{ fontSize: 12, color: '#059669', fontWeight: 700, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
               <Sparkles size={13} /> Next Renewal: {formatDate(nextRenewal)} (1 Year − 1 Day)
             </div>
           )}
@@ -714,13 +844,293 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
           <label className="form-label">Insurance Company <span className="required">*</span></label>
           <input className="form-input" value={form.nameOfCompany} onChange={e => set('nameOfCompany', e.target.value)} placeholder="e.g. New India Assurance" />
         </div>
+        <div className="form-group">
+          <label className="form-label">Insurance Agent / Broker</label>
+          <input className="form-input" value={form.agentName} onChange={e => set('agentName', e.target.value)} placeholder="Agent name" />
+        </div>
       </div>
 
+      {/* ─── 1. OWN DAMAGE / SELF ACCIDENT ─── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <div className="form-section-header" style={{ margin: 0 }}>
+          <div className="form-section-icon"><Car size={18} strokeWidth={2.2} /></div>
+          <div className="form-section-title">Own Damage / Self Accident Details</div>
+        </div>
+        <div>
+          {renewOd ? (
+            <span style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 6, background: '#fef3c7', color: '#b45309' }}>
+              ● Due for Renewal
+            </span>
+          ) : (
+            <span style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 6, background: '#ecfdf5', color: '#059669' }}>
+              ✓ Valid till {existingOdEnd ? formatDate(existingOdEnd) : 'Active'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {!renewOd ? (
+        <div style={{ padding: '14px 18px', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CheckCircle size={15} /> Own Damage is Active & Valid till {existingOdEnd ? formatDate(existingOdEnd) : 'Active'}
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+              Renewal date has not arrived yet {odStatus.days !== null ? `(${odStatus.days} days remaining)` : ''}. Form is closed for this section.
+            </div>
+          </div>
+          <button type="button" onClick={() => toggleSection('od', true)} className="btn btn-outline btn-xs" style={{ fontSize: 11.5 }}>
+            ↻ Renew Anyway
+          </button>
+        </div>
+      ) : (
+        <div style={{ background: '#ffffff', borderRadius: 12, border: '1px solid #fed7aa', padding: '16px', marginBottom: 24 }}>
+          {!odStatus.isDue && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+              <button type="button" onClick={() => toggleSection('od', false)} className="btn btn-ghost btn-xs" style={{ color: '#64748b', fontSize: 11 }}>
+                ✕ Cancel OD Renewal & Keep Existing
+              </button>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 16 }}>
+            <div className="form-group">
+              <label className="form-label">OD Policy Start Date</label>
+              <input type="date" className="form-input" value={form.odStartDate || ''} onChange={e => {
+                const s = e.target.value;
+                const ren = s ? calcInsuranceRenewal(s) : null;
+                set('odStartDate', s);
+                if (ren) set('odEndDate', toInputDate(ren));
+              }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">OD Policy End Date</label>
+              <input type="date" className="form-input" value={form.odEndDate || ''} onChange={e => set('odEndDate', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Renewed IDV Value (₹)</label>
+              <input type="number" className="form-input" value={form.idvValue} onChange={e => set('idvValue', e.target.value)} placeholder="e.g. 1200000" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Own Damage / Basic Premium (₹)</label>
+              <input type="number" className="form-input" value={form.basicPremium} onChange={e => set('basicPremium', e.target.value)} placeholder="0" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Claimed Insurance Last Year?</label>
+              <select className="form-select" value={form.claimedLastYear} onChange={e => set('claimedLastYear', e.target.value)}>
+                <option value="No">No</option>
+                <option value="Yes">Yes</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Policy Inclusive of NCB?</label>
+              <select className="form-select" value={form.policyInclusiveOfNcb} onChange={e => set('policyInclusiveOfNcb', e.target.value)}>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">NCB Discount Amount (₹)</label>
+              <input type="number" className="form-input" value={form.premiumOfNcb} onChange={e => set('premiumOfNcb', e.target.value)} placeholder="0" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Cashless Facility Available?</label>
+              <select className="form-select" value={form.cashlessPolicy} onChange={e => set('cashlessPolicy', e.target.value)}>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Add-On Premium (₹)</label>
+              <input type="number" className="form-input" value={form.addOnPremium} onChange={e => set('addOnPremium', e.target.value)} placeholder="0" />
+            </div>
+          </div>
+
+          {/* Add-On Covers Included */}
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#334155', marginBottom: 12 }}>
+              Add-On Covers Included
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12, padding: '16px', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+              {[
+                ['ZD (Zero Depreciation)', 'depreciationReimbursement'],
+                ['EP (Engine Protect)', 'engineSecure'],
+                ['CM (Consumable Expenses)', 'consumableExpenses'],
+                ['PB (Loss of Personal Belonging)', 'personalBelonging'],
+                ['KP (Key Protect)', 'keyReplacement'],
+                ['RTI (Return to Invoice)', 'returnToInvoice'],
+                ['Roadside Assistance (RSA)', 'roadsideAssistance'],
+                ['Emergency Transport & Hotel', 'emergencyTransportHotel'],
+              ].map(([label, field]) => (
+                <CheckField key={field} label={label} checked={form[field]} onChange={() => set(field, !form[field])} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 2. THIRD PARTY (TP) INSURANCE ─── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <div className="form-section-header" style={{ margin: 0 }}>
+          <div className="form-section-icon"><Shield size={18} strokeWidth={2.2} /></div>
+          <div className="form-section-title">Third Party (TP) Insurance Details</div>
+        </div>
+        <div>
+          {renewTp ? (
+            <span style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 6, background: '#fef3c7', color: '#b45309' }}>
+              ● Due for Renewal
+            </span>
+          ) : (
+            <span style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 6, background: '#ecfdf5', color: '#059669' }}>
+              ✓ Valid till {existingTpEnd ? formatDate(existingTpEnd) : 'Active'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {!renewTp ? (
+        <div style={{ padding: '14px 18px', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CheckCircle size={15} /> Third Party (TP) Insurance is Active & Valid till {existingTpEnd ? formatDate(existingTpEnd) : 'Active'}
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+              {existingIns?.tpPolicyNo ? `Policy No: ${existingIns.tpPolicyNo} · ` : ''}Renewal date has not arrived yet {tpStatus.days !== null ? `(${tpStatus.days} days remaining)` : ''}. Form is closed for this section.
+            </div>
+          </div>
+          <button type="button" onClick={() => toggleSection('tp', true)} className="btn btn-outline btn-xs" style={{ fontSize: 11.5 }}>
+            ↻ Renew Anyway
+          </button>
+        </div>
+      ) : (
+        <div style={{ background: '#ffffff', borderRadius: 12, border: '1px solid #fed7aa', padding: '16px', marginBottom: 24 }}>
+          {!tpStatus.isDue && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+              <button type="button" onClick={() => toggleSection('tp', false)} className="btn btn-ghost btn-xs" style={{ color: '#64748b', fontSize: 11 }}>
+                ✕ Cancel TP Renewal & Keep Existing
+              </button>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+            <div className="form-group">
+              <label className="form-label">TP Policy Start Date</label>
+              <input type="date" className="form-input" value={form.tpStartDate || ''} onChange={e => {
+                const s = e.target.value;
+                const ren = s ? calcInsuranceRenewal(s) : null;
+                set('tpStartDate', s);
+                if (ren) set('tpEndDate', toInputDate(ren));
+              }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">TP Policy End Date</label>
+              <input type="date" className="form-input" value={form.tpEndDate || ''} onChange={e => set('tpEndDate', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">3rd Party Premium (₹)</label>
+              <input type="number" className="form-input" value={form.thirdPartyPremium} onChange={e => set('thirdPartyPremium', e.target.value)} placeholder="0" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">TP Policy / Certificate No.</label>
+              <input className="form-input" value={form.tpPolicyNo} onChange={e => set('tpPolicyNo', e.target.value)} placeholder="Policy / Certificate number" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">TPPD Coverage Limit (₹)</label>
+              <input type="number" className="form-input" value={form.tppdLimit} onChange={e => set('tppdLimit', e.target.value)} placeholder="750000" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 3. PERSONAL ACCIDENT (PA) COVER ─── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <div className="form-section-header" style={{ margin: 0 }}>
+          <div className="form-section-icon"><Clock size={18} strokeWidth={2.2} /></div>
+          <div className="form-section-title">Personal Accident (PA) Cover Details</div>
+        </div>
+        <div>
+          {renewPa ? (
+            <span style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 6, background: '#fef3c7', color: '#b45309' }}>
+              ● Due for Renewal
+            </span>
+          ) : (
+            <span style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 6, background: '#ecfdf5', color: '#059669' }}>
+              ✓ Valid till {existingPaEnd ? formatDate(existingPaEnd) : 'Active'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {!renewPa ? (
+        <div style={{ padding: '14px 18px', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CheckCircle size={15} /> Personal Accident (PA) Cover is Active & Valid till {existingPaEnd ? formatDate(existingPaEnd) : 'Active'}
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+              {existingIns?.paNomineeName ? `Nominee: ${existingIns.paNomineeName} · ` : ''}Renewal date has not arrived yet {paStatus.days !== null ? `(${paStatus.days} days remaining)` : ''}. Form is closed for this section.
+            </div>
+          </div>
+          <button type="button" onClick={() => toggleSection('pa', true)} className="btn btn-outline btn-xs" style={{ fontSize: 11.5 }}>
+            ↻ Renew Anyway
+          </button>
+        </div>
+      ) : (
+        <div style={{ background: '#ffffff', borderRadius: 12, border: '1px solid #fed7aa', padding: '16px', marginBottom: 24 }}>
+          {!paStatus.isDue && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+              <button type="button" onClick={() => toggleSection('pa', false)} className="btn btn-ghost btn-xs" style={{ color: '#64748b', fontSize: 11 }}>
+                ✕ Cancel PA Renewal & Keep Existing
+              </button>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+            <div className="form-group">
+              <label className="form-label">PA Cover Type</label>
+              <select className="form-select" value={form.paCoverType} onChange={e => set('paCoverType', e.target.value)}>
+                <option value="Owner-Driver CPA (₹15 Lakhs)">Owner-Driver CPA (₹15 Lakhs)</option>
+                <option value="Named Passenger Cover">Named Passenger Cover</option>
+                <option value="Paid Driver Cover">Paid Driver Cover</option>
+                <option value="None / Separate Policy">None / Separate Policy</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">PA Sum Insured (₹)</label>
+              <input type="number" className="form-input" value={form.paSumInsured} onChange={e => set('paSumInsured', e.target.value)} placeholder="1500000" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">PA Premium (₹)</label>
+              <input type="number" className="form-input" value={form.paPremium} onChange={e => set('paPremium', e.target.value)} placeholder="0" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">PA Start Date</label>
+              <input type="date" className="form-input" value={form.paStartDate || ''} onChange={e => {
+                const s = e.target.value;
+                const ren = s ? calcInsuranceRenewal(s) : null;
+                set('paStartDate', s);
+                if (ren) set('paEndDate', toInputDate(ren));
+              }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">PA End Date</label>
+              <input type="date" className="form-input" value={form.paEndDate || ''} onChange={e => set('paEndDate', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Nominee Name</label>
+              <input className="form-input" value={form.paNomineeName} onChange={e => set('paNomineeName', e.target.value)} placeholder="Full name of nominee" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Nominee Relationship</label>
+              <input className="form-input" value={form.paNomineeRelation} onChange={e => set('paNomineeRelation', e.target.value)} placeholder="e.g. Spouse, Father, Mother" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 4. TOTAL PREMIUM & TAXES BREAKDOWN ─── */}
       <div className="form-section-header">
         <div className="form-section-icon"><CreditCard size={18} strokeWidth={2.2} /></div>
-        <div className="form-section-title">Renewed Premium Details</div>
+        <div className="form-section-title">Total Premium & Taxes Breakdown</div>
       </div>
-      {renewNet > 0 && (
+      {renewNet > 0 ? (
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -740,55 +1150,20 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
           <span>•</span>
           <span style={{ fontWeight: 800 }}>Total: ₹{(renewNet + Math.round(renewNet * 0.18)).toLocaleString('en-IN')}</span>
         </div>
+      ) : (
+        <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 16, fontSize: 12, color: '#64748b' }}>
+          ℹ No covers currently selected for renewal. Premium will calculate as you renew covers.
+        </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
-        <div className="form-group">
-          <label className="form-label">Renewed IDV Value (₹)</label>
-          <input type="number" className="form-input" value={form.idvValue} onChange={e => set('idvValue', e.target.value)} placeholder="0" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Basic Premium (₹)</label>
-          <input type="number" className="form-input" value={form.basicPremium} onChange={e => set('basicPremium', e.target.value)} placeholder="0" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">3rd Party Premium (₹)</label>
-          <input type="number" className="form-input" value={form.thirdPartyPremium} onChange={e => set('thirdPartyPremium', e.target.value)} placeholder="0" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Add-On Premium (₹)</label>
-          <input type="number" className="form-input" value={form.addOnPremium} onChange={e => set('addOnPremium', e.target.value)} placeholder="0" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">NCB Premium / Discount (₹)</label>
-          <input type="number" className="form-input" value={form.premiumOfNcb} onChange={e => set('premiumOfNcb', e.target.value)} placeholder="0" />
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
         <div className="form-group">
           <label className="form-label">Tax / GST (18%) (₹)</label>
           <input type="number" className="form-input" value={form.taxAmount} onChange={e => set('taxAmount', e.target.value)} placeholder="0" />
         </div>
         <div className="form-group">
           <label className="form-label">Total Premium Amount (₹) <span className="required">*</span></label>
-          <input type="number" className="form-input" value={form.totalPremiumAmount} onChange={e => set('totalPremiumAmount', e.target.value)} placeholder="0" style={{ fontWeight: 800, color: '#059669' }} />
+          <input type="number" className="form-input" value={form.totalPremiumAmount} onChange={e => set('totalPremiumAmount', e.target.value)} placeholder="0" style={{ fontWeight: 800, color: '#059669', fontSize: 16 }} />
         </div>
-      </div>
-
-      <div className="form-section-header">
-        <div className="form-section-icon"><ShieldCheck size={18} strokeWidth={2.2} /></div>
-        <div className="form-section-title">Add-On Covers</div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14, marginBottom: 24, padding: '18px', background: '#f8fafc', borderRadius: 14, border: '1px solid #e2e8f0' }}>
-        {[
-          ['Depreciation Reimbursement', 'depreciationReimbursement'],
-          ['Engine Secure', 'engineSecure'],
-          ['Consumable Expenses', 'consumableExpenses'],
-          ['Loss of Personal Belonging', 'personalBelonging'],
-          ['Roadside Assistance', 'roadsideAssistance'],
-          ['Key Replacement', 'keyReplacement'],
-          ['Emergency Transport & Hotel', 'emergencyTransportHotel'],
-        ].map(([label, field]) => (
-          <CheckField key={field} label={label} checked={form[field]}
-            onChange={() => set(field, !form[field])} />
-        ))}
       </div>
 
       <div className="modal-footer" style={{ padding: '20px 0 0' }}>
@@ -808,14 +1183,51 @@ const InsuranceDetails = ({ ins }) => {
   const hasPa = ins.hasPaCover === 'Yes' || !!ins.paPremium;
 
   const addOns = [
-    ['Depreciation Reimbursement (Zero Dep)', ins.depreciationReimbursement],
-    ['Engine Secure', ins.engineSecure], ['Consumable Expenses', ins.consumableExpenses],
-    ['Loss of Personal Belonging', ins.personalBelonging], ['Roadside Assistance', ins.roadsideAssistance],
-    ['Key Replacement', ins.keyReplacement], ['Emergency Transport & Hotel', ins.emergencyTransportHotel],
+    ['ZD (Zero Depreciation)', ins.depreciationReimbursement],
+    ['EP (Engine Protect)', ins.engineSecure],
+    ['CM (Consumables)', ins.consumableExpenses],
+    ['PB (Loss of Personal Belonging)', ins.personalBelonging],
+    ['KP (Key Protect)', ins.keyReplacement],
+    ['RTI (Return to Invoice)', ins.returnToInvoice],
+    ['Roadside Assistance (RSA)', ins.roadsideAssistance],
+    ['Emergency Transport & Hotel', ins.emergencyTransportHotel],
   ].filter(([, v]) => v);
 
   return (
     <div>
+      {/* Insurance & Vehicle Header Info */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 16px',
+        background: '#eff6ff',
+        borderRadius: 12,
+        border: '1px solid #bfdbfe',
+        marginBottom: 16,
+        flexWrap: 'wrap',
+        gap: 12
+      }}>
+        <div>
+          <div style={{ fontSize: 11, color: '#1e40af', fontWeight: 800, textTransform: 'uppercase' }}>Insurance ID</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#1e3a8a', fontFamily: 'monospace' }}>
+            {ins.insuranceId || '—'}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Vehicle ID</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{ins.vehicleId || '—'}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Car Name</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{ins.carName || '—'}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Insurance Company</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{ins.nameOfCompany || '—'}</div>
+        </div>
+      </div>
+
       {/* Active Coverage Type Badges */}
       <div style={{
         display: 'flex',
@@ -988,6 +1400,73 @@ const InsuranceDetails = ({ ins }) => {
   );
 };
 
+// ─── Date with Renewal Alert Sign ─────────────────────────────────────────────
+const DateWithAlert = ({ dateStr }) => {
+  if (!dateStr) return <span style={{ color: '#94a3b8' }}>—</span>;
+  const days = daysUntil(dateStr);
+  if (days === null || isNaN(days)) {
+    return <span style={{ color: '#0f172a', fontWeight: 600, fontSize: 12 }}>{formatDate(dateStr)}</span>;
+  }
+
+  // 1. Expired (Renewal overdue)
+  if (days < 0) {
+    return (
+      <span
+        title={`Expired ${Math.abs(days)} days ago! Immediate renewal required.`}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          padding: '2px 7px', borderRadius: 6,
+          background: '#fee2e2', color: '#b91c1c', fontWeight: 800, fontSize: 11.5,
+          border: '1px solid #fca5a5', whiteSpace: 'nowrap'
+        }}
+      >
+        <AlertTriangle size={12} color="#dc2626" /> {formatDate(dateStr)}
+      </span>
+    );
+  }
+
+  // 2. Urgent (≤7 Days)
+  if (days <= 7) {
+    return (
+      <span
+        title={`Urgent: Renewal due in ${days} days!`}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          padding: '2px 7px', borderRadius: 6,
+          background: '#fef3c7', color: '#b45309', fontWeight: 800, fontSize: 11.5,
+          border: '1px solid #fde68a', whiteSpace: 'nowrap'
+        }}
+      >
+        <AlertTriangle size={12} color="#d97706" /> {formatDate(dateStr)}
+      </span>
+    );
+  }
+
+  // 3. Expiring Soon (≤30 Days)
+  if (days <= 30) {
+    return (
+      <span
+        title={`Renewal upcoming in ${days} days`}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          padding: '2px 7px', borderRadius: 6,
+          background: '#ffedd5', color: '#c2410c', fontWeight: 700, fontSize: 11.5,
+          border: '1px solid #fed7aa', whiteSpace: 'nowrap'
+        }}
+      >
+        <Clock size={12} color="#ea580c" /> {formatDate(dateStr)}
+      </span>
+    );
+  }
+
+  // 4. Active & Safe (>30 Days)
+  return (
+    <span style={{ color: '#0f172a', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}>
+      {formatDate(dateStr)}
+    </span>
+  );
+};
+
 // ─── Main Insurance Component ─────────────────────────────────────────────────
 const Insurance = () => {
   const [cars, setCars] = useState([]);
@@ -1014,8 +1493,15 @@ const Insurance = () => {
 
   const getDaysLeft = (car) => {
     const ins = insMap[car.vehicleId];
-    if (!ins || (!ins.renewalDate && !ins.validityDate)) return null;
-    return daysUntil(ins.renewalDate || ins.validityDate);
+    if (!ins) return null;
+    const odEnd = ins.odEndDate || ins.renewalDate || ins.validityDate;
+    const tpEnd = ins.tpEndDate;
+    const paEnd = ins.paEndDate;
+    const allEnds = [odEnd, tpEnd, paEnd].filter(Boolean);
+    if (allEnds.length === 0) return null;
+    const dayCounts = allEnds.map(d => daysUntil(d)).filter(d => d !== null && !isNaN(d));
+    if (dayCounts.length === 0) return null;
+    return Math.min(...dayCounts);
   };
 
   const getStatus = (car) => {
@@ -1132,21 +1618,35 @@ const Insurance = () => {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Vehicle ID</th>
-                  <th>Car Name</th>
-                  <th>Reg. No.</th>
-                  <th>Insurance Company</th>
-                  <th>IDV Value</th>
-                  <th>Total Premium</th>
-                  <th>Insurance Date</th>
-                  <th>Validity Date</th>
-                  <th>Renewal Date</th>
-                  <th>Days Left</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'center', background: '#ecfdf5', color: '#065f46', borderLeft: '1.5px solid #a7f3d0' }}>
+                  <th style={{ whiteSpace: 'nowrap' }}>Insurance ID</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Vehicle ID</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Car Name</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Reg. No.</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Insurance Company</th>
+
+                  {/* 1. Own Damage Group */}
+                  <th style={{ whiteSpace: 'nowrap', background: '#f0fdf4', color: '#166534', borderLeft: '1.5px solid #bbf7d0' }}>Own Damage (OD)</th>
+                  <th style={{ whiteSpace: 'nowrap', background: '#f0fdf4', color: '#166534' }}>IDV Value</th>
+                  <th style={{ whiteSpace: 'nowrap', background: '#f0fdf4', color: '#166534' }}>OD Policy Start Date</th>
+                  <th style={{ whiteSpace: 'nowrap', background: '#f0fdf4', color: '#166534', borderRight: '1.5px solid #bbf7d0' }}>OD Policy End Date</th>
+
+                  {/* 2. Third Party Group */}
+                  <th style={{ whiteSpace: 'nowrap', background: '#f0f9ff', color: '#0369a1', borderLeft: '1.5px solid #bae6fd' }}>3rd Party Premium (₹)</th>
+                  <th style={{ whiteSpace: 'nowrap', background: '#f0f9ff', color: '#0369a1' }}>TP Policy Start Date</th>
+                  <th style={{ whiteSpace: 'nowrap', background: '#f0f9ff', color: '#0369a1', borderRight: '1.5px solid #bae6fd' }}>TP Policy End Date</th>
+
+                  {/* 3. Personal Accident Group */}
+                  <th style={{ whiteSpace: 'nowrap', background: '#fffbeb', color: '#92400e', borderLeft: '1.5px solid #fde68a' }}>Personal Accident (PA)</th>
+                  <th style={{ whiteSpace: 'nowrap', background: '#fffbeb', color: '#92400e' }}>PA Premium (₹)</th>
+                  <th style={{ whiteSpace: 'nowrap', background: '#fffbeb', color: '#92400e' }}>PA Start Date</th>
+                  <th style={{ whiteSpace: 'nowrap', background: '#fffbeb', color: '#92400e', borderRight: '1.5px solid #fde68a' }}>PA End Date</th>
+
+                  <th style={{ whiteSpace: 'nowrap' }}>Total Premium</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Status</th>
+                  <th style={{ textAlign: 'center', background: '#ecfdf5', color: '#065f46', borderLeft: '1.5px solid #a7f3d0', whiteSpace: 'nowrap' }}>
                     🔄 Renewal Action
                   </th>
-                  <th style={{ textAlign: 'center' }}>Details</th>
+                  <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>Details</th>
                 </tr>
               </thead>
               <tbody>
@@ -1156,8 +1656,17 @@ const Insurance = () => {
 
                   return (
                     <tr key={car.vehicleId} style={{ background: isWeekReminder ? '#fefce8' : isExpired ? '#fff1f2' : undefined }}>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {ins?.insuranceId ? (
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: 6, border: '1px solid #bfdbfe' }}>
+                            {ins.insuranceId}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94a3b8' }}>—</span>
+                        )}
+                      </td>
                       <td><span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#059669' }}>{car.vehicleId}</span></td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: 700, color: '#0f172a' }}>{car.carName}</div>
                         {isWeekReminder && (
                           <span style={{ fontSize: 10.5, fontWeight: 800, color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: 10, display: 'inline-block', marginTop: 2 }}>
@@ -1165,32 +1674,61 @@ const Insurance = () => {
                           </span>
                         )}
                       </td>
-                      <td><span style={{ fontWeight: 600 }}>{car.registrationNo}</span></td>
-                      <td>{ins?.nameOfCompany || <span style={{ color: '#94a3b8' }}>—</span>}</td>
-                      <td>{ins?.idvValue ? `₹${Number(ins.idvValue).toLocaleString('en-IN')}` : '—'}</td>
-                      <td>{ins?.totalPremiumAmount ? `₹${Number(ins.totalPremiumAmount).toLocaleString('en-IN')}` : '—'}</td>
-                      <td>{ins ? formatDate(ins.date) : '—'}</td>
-                      <td>{ins ? formatDate(ins.validityDate) : '—'}</td>
-                      <td>
-                        {ins ? (
-                          <span style={{ fontWeight: isWeekReminder || isExpired ? 800 : 500, color: isWeekReminder ? '#b45309' : isExpired ? '#dc2626' : 'inherit' }}>
-                            {formatDate(ins.renewalDate)}
-                          </span>
-                        ) : '—'}
+                      <td style={{ whiteSpace: 'nowrap' }}><span style={{ fontWeight: 600 }}>{car.registrationNo}</span></td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{ins?.nameOfCompany || <span style={{ color: '#94a3b8' }}>—</span>}</td>
+
+                      {/* 1. Own Damage Group */}
+                      <td style={{ borderLeft: '1.5px solid #bbf7d0', background: isWeekReminder ? '#fefce8' : '#f0fdf420', whiteSpace: 'nowrap' }}>
+                        {ins?.basicPremium ? `₹${Number(ins.basicPremium).toLocaleString('en-IN')}` : (ins?.hasOwnDamage === 'No' ? <span style={{ color: '#94a3b8' }}>No</span> : '—')}
                       </td>
-                      <td>
-                        {days !== null ? (
-                          <span style={{
-                            fontSize: 13, fontWeight: 800,
-                            color: days < 0 ? '#dc2626' : days <= 7 ? '#d97706' : days <= 30 ? '#ea580c' : '#059669',
-                            background: days <= 7 || days < 0 ? 'rgba(0,0,0,0.04)' : 'transparent',
-                            padding: '2px 6px', borderRadius: 6
-                          }}>
-                            {days < 0 ? `${Math.abs(days)}d ago` : `${days}d`}
-                          </span>
-                        ) : '—'}
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {ins?.idvValue ? `₹${Number(ins.idvValue).toLocaleString('en-IN')}` : '—'}
                       </td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {ins ? formatDate(ins.odStartDate || ins.date) : '—'}
+                      </td>
+                      <td style={{ borderRight: '1.5px solid #bbf7d0', whiteSpace: 'nowrap' }}>
+                        <DateWithAlert dateStr={ins?.odEndDate || ins?.validityDate || ins?.renewalDate} />
+                      </td>
+
+                      {/* 2. Third Party Group */}
+                      <td style={{ borderLeft: '1.5px solid #bae6fd', background: isWeekReminder ? '#fefce8' : '#f0f9ff20', whiteSpace: 'nowrap' }}>
+                        {ins?.thirdPartyPremium ? `₹${Number(ins.thirdPartyPremium).toLocaleString('en-IN')}` : (ins?.hasThirdParty === 'No' ? <span style={{ color: '#94a3b8' }}>No</span> : '—')}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {ins ? formatDate(ins.tpStartDate || (ins.hasThirdParty === 'Yes' ? ins.date : '')) : '—'}
+                      </td>
+                      <td style={{ borderRight: '1.5px solid #bae6fd', whiteSpace: 'nowrap' }}>
+                        <DateWithAlert dateStr={ins?.tpEndDate || (ins?.hasThirdParty === 'Yes' ? (ins.odEndDate || ins.validityDate) : '')} />
+                      </td>
+
+                      {/* 3. Personal Accident Group */}
+                      <td style={{ borderLeft: '1.5px solid #fde68a', background: isWeekReminder ? '#fefce8' : '#fffbeb20', whiteSpace: 'nowrap' }}>
+                        {ins?.hasPaCover === 'No' ? (
+                          <span style={{ color: '#94a3b8' }}>No</span>
+                        ) : ins?.paCoverType ? (
+                          <span style={{ fontSize: 11.5, fontWeight: 600 }}>{ins.paCoverType}</span>
+                        ) : (
+                          ins?.hasPaCover === 'Yes' ? 'Owner-Driver CPA' : '—'
+                        )}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {ins?.paPremium ? `₹${Number(ins.paPremium).toLocaleString('en-IN')}` : '—'}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {ins ? formatDate(ins.paStartDate || (ins.hasPaCover === 'Yes' ? ins.date : '')) : '—'}
+                      </td>
+                      <td style={{ borderRight: '1.5px solid #fde68a', whiteSpace: 'nowrap' }}>
+                        <DateWithAlert dateStr={ins?.paEndDate || (ins?.hasPaCover === 'Yes' ? (ins.odEndDate || ins.validityDate) : '')} />
+                      </td>
+
+                      {/* Total Premium */}
+                      <td style={{ fontWeight: 700, color: '#059669', whiteSpace: 'nowrap' }}>
+                        {ins?.totalPremiumAmount || ins?.totalPremiumToBePaid ? `₹${Number(ins.totalPremiumAmount || ins.totalPremiumToBePaid).toLocaleString('en-IN')}` : '—'}
+                      </td>
+
+                      {/* Status */}
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <Badge
                           label={
                             !ins ? 'Not Available' :
@@ -1208,7 +1746,7 @@ const Insurance = () => {
                       </td>
 
                       {/* ─── Renewal Action Column (Direct Update Button) ─── */}
-                      <td style={{ textAlign: 'center', background: isWeekReminder ? '#fef9c3' : '#f0fdf4', borderLeft: '1.5px solid #a7f3d0' }}>
+                      <td style={{ textAlign: 'center', background: isWeekReminder ? '#fef9c3' : '#f0fdf4', borderLeft: '1.5px solid #a7f3d0', whiteSpace: 'nowrap' }}>
                         {canEdit ? (
                           ins ? (
                             <button
@@ -1244,7 +1782,7 @@ const Insurance = () => {
                         )}
                       </td>
 
-                      <td style={{ textAlign: 'center' }}>
+                      <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                         {ins ? (
                           <button className="btn btn-ghost btn-xs" onClick={() => setDetailModal(ins)}>
                             <Eye size={15} /> Details

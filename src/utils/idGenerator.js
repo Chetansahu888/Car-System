@@ -26,4 +26,22 @@ export const generateClaimNo = (existingClaims = []) => {
   return `CLM-${pad(maxId + 1)}`;
 };
 
+export const generateEmiNo = (existingCars = []) => {
+  const maxId = (existingCars || []).reduce((max, car) => {
+    const raw = car?.emiNo || (typeof car === 'string' ? car : '');
+    const num = parseInt(String(raw).replace(/[^0-9]/g, ''), 10);
+    return isNaN(num) ? max : Math.max(max, num);
+  }, 0);
+  return `EMI-${pad(maxId + 1)}`;
+};
+
+export const generateInsuranceId = (existingInsurance = []) => {
+  const maxId = (existingInsurance || []).reduce((max, ins) => {
+    const raw = ins?.insuranceId || ins?.id || (typeof ins === 'string' ? ins : '');
+    const num = parseInt(String(raw).replace(/[^0-9]/g, ''), 10);
+    return isNaN(num) ? max : Math.max(max, num);
+  }, 0);
+  return `INS-${pad(maxId + 1)}`;
+};
+
 export const generateId = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

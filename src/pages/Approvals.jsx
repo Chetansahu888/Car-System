@@ -45,7 +45,7 @@ const ApprovalFormModal = ({ offer, onClose, onSaved }) => {
 
   return (
     <form onSubmit={handleSubmit} style={{ position: 'relative' }}>
-      <LoadingOverlay isVisible={submitting} message="Submitting Approval to Google Sheets..." />
+      <LoadingOverlay isVisible={submitting} message="Please Wait" />
 
       {/* Header Info Box */}
       <div style={{

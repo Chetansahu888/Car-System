@@ -2,8 +2,8 @@
 // Dual-layer data store: Synchronous local state + background sync to connected Google Sheets API.
 
 import { getScriptUrl, fetchFromSheet, sendToSheet } from '../api/googleSheetsClient';
-import { createTimestamp, today, calculateExpectedSettlementDate } from '../utils/dateUtils';
-import { generateClaimNo, generateId } from '../utils/idGenerator';
+import { createTimestamp, today, calculateExpectedSettlementDate, calcEmiDetails } from '../utils/dateUtils';
+import { generateClaimNo, generateId, generateEmiNo, generateInsuranceId } from '../utils/idGenerator';
 
 const KEYS = {
   CARS: 'cms_cars',
@@ -171,7 +171,7 @@ export const mapSheetRowToUser = (row, index) => {
   };
 };
 
-// ─── MAPPER FOR "Purchase Car Details" SHEET ──────────────────────────────────
+// ─── MAPPER FOR "Purchase Car Details" SHEET (EXACT 23 COLUMNS A:W) ───────────
 export const mapCarToSheet = (car) => ({
   "Timestamp": car.timestamp || car.createdAt || createTimestamp(),
   "Vehicle ID": car.vehicleId || '',
@@ -184,31 +184,64 @@ export const mapCarToSheet = (car) => ({
   "REGISTRATION NO.": car.registrationNo || '',
   "CHASSIS NO.": car.chassisNo || '',
   "ENGINE NO.": car.engineNo || '',
-  "HYPOTHICATION BANK": car.hypothecationBank || '',
-  "LOAN AMOUNT": car.loanAmount || '',
-  "EMI START DATE": car.emiStartDate || '',
-  "LAST EMI DATE": car.lastEmiDate || '',
-  "DATE OF RELEASE OF HYPOTHICATION": car.dateOfReleaseHypothecation || '',
   "VALUE OF CAR": car.valueOfCar || '',
-  "EMI AMOUNT": car.emiAmount || '',
-  "TOTAL EMIS": car.totalEmis || '',
-  "PAID EMIS": car.paidEmis || '',
-  "PAID EMI AMOUNT": car.paidEmiAmount || '',
-  "REMAINING LOAN AMOUNT": car.remainingLoanAmount || '',
-  "EMI (Y/N)": car.hasEmi === false ? 'No' : (car.hasEmi === true ? 'Yes' : (checkHasEmi(car) ? 'Yes' : 'No')),
-  "INSURANCE AMOUNT": car.insuranceAmount || '',
   "RTO AMOUNT": car.rtoAmount || '',
+  "EMI on Vehicle": (car.hasEmi === 'Yes' || car.hasEmi === true || car.emiStatus === 'Yes' || checkHasEmi(car)) ? 'Yes' : 'No',
   "COMPANY MOBILE NO.": car.companyMobileNo || '',
   "SERVICE PERSON NAME": car.servicePersonName || '',
   "SERVICE PERSON MOBILE NO": car.servicePersonMobileNo || '',
-  "Copy Of Insurance": car.copyOfInsurance?.url || (typeof car.copyOfInsurance === 'string' ? car.copyOfInsurance : '') || '',
-  "Copy Of Registration": car.copyOfRegistration?.url || (typeof car.copyOfRegistration === 'string' ? car.copyOfRegistration : '') || '',
-  "Name Of The Company": car.nameOfCompany || '',
   "Name Of The Owner": car.nameOfOwner || '',
-  "Agent Name": car.agentName || '',
-  "Date Of Insurance": car.dateOfInsurance || '',
+  "Vehicle Assign To": car.vehicleAssignTo || car.assignedTo || '',
+  "Employee Id": car.employeeId || '',
   "Pollution Date": car.pollutionDate || '',
+  "Insurance of Vehicle": (car.hasInsurance === 'Yes' || car.hasInsurance === true || (car.insurance && car.insurance !== 'No') || car.hasOwnDamage === 'Yes' || car.hasThirdParty === 'Yes') ? 'Yes' : 'No',
+  "Copy Of Registration": car.copyOfRegistration?.url || (typeof car.copyOfRegistration === 'string' ? car.copyOfRegistration : '') || '',
 });
+
+// ─── MAPPER FOR "EMI On Vehicle" SHEET (EXACT 12 COLUMNS A:L, ROW 6 HEADERS, DATA ROW 7+) ───
+export const mapEmiToSheet = (car, existingCars = []) => {
+  const emiCalc = calcEmiDetails(car);
+  const emiNo = car.emiNo || generateEmiNo(existingCars);
+  return {
+    "Timestamps": car.timestamp || car.createdAt || createTimestamp(),
+    "EMI No": emiNo,
+    "HYPOTHICATION BANK": car.hypothecationBank || '',
+    "Total Loan Amount (₹)": car.loanAmount || '',
+    "Monthly EMI Amount (₹)": car.emiAmount || '',
+    "EMI Start Date": car.emiStartDate || '',
+    "Last EMI Date": car.lastEmiDate || '',
+    "DATE OF RELEASE OF HYPOTHICATION": car.dateOfReleaseHypothecation || '',
+    "Total Tenure (Months / Total EMIs)": car.totalEmis || '',
+    "EMIs Paid So Far (Count)": car.paidEmis || '',
+    "Amount Paid So Far (₹) (अब तक पे किया)": car.paidEmiAmount !== undefined && car.paidEmiAmount !== '' ? String(car.paidEmiAmount) : (emiCalc?.paidAmount > 0 ? String(emiCalc.paidAmount) : '0'),
+    "Remaining Balance to Pay (₹) (बाकी है)": car.remainingLoanAmount !== undefined && car.remainingLoanAmount !== '' ? String(car.remainingLoanAmount) : (emiCalc?.remainingAmount > 0 ? String(emiCalc.remainingAmount) : (emiCalc?.isCompleted ? '0' : '0')),
+  };
+};
+
+export const syncEmiToSheet = async (car) => {
+  if (!car) return;
+  const isEmi = car.hasEmi === 'Yes' || car.hasEmi === true || car.emiStatus === 'Yes' || checkHasEmi(car);
+  if (!isEmi) return;
+
+  const cars = load(KEYS.CARS);
+  if (!car.emiNo) {
+    car.emiNo = generateEmiNo(cars);
+    const carIdx = cars.findIndex(c => c.vehicleId === car.vehicleId || (car.registrationNo && c.registrationNo === car.registrationNo));
+    if (carIdx !== -1) {
+      cars[carIdx].emiNo = car.emiNo;
+      save(KEYS.CARS, cars);
+    }
+  }
+
+  const emiPayload = mapEmiToSheet(car, cars);
+  return await sendToSheet({
+    action: 'update',
+    sheetName: 'EMI On Vehicle',
+    keyField: 'EMI No',
+    keyValue: emiPayload['EMI No'],
+    data: emiPayload
+  });
+};
 
 export const mapSheetRowToCar = (row, index) => {
   if (!row || typeof row !== 'object') return null;
@@ -232,6 +265,12 @@ export const mapSheetRowToCar = (row, index) => {
   const carName = get('NAME OF CAR / Vehicle', 'Name of Car / Vehicle', 'carName', 'Car Name');
   if (!regNo && !carName) return null;
 
+  const emiOnVehicle = get('EMI on Vehicle', 'EMI on vehicle', 'EMI (Y/N)', 'EMI Status', 'Is EMI', 'hasEmi', 'EMI');
+  const isEmi = emiOnVehicle === 'Yes' || emiOnVehicle === 'yes' || emiOnVehicle === true || emiOnVehicle === 'TRUE';
+
+  const insOnVehicle = get('Insurance of Vehicle', 'Insurance Of Vehicle', 'Insurance', 'hasInsurance');
+  const isIns = insOnVehicle === 'Yes' || insOnVehicle === 'yes' || insOnVehicle === true || insOnVehicle === 'TRUE';
+
   return {
     vehicleId: get('Vehicle ID', 'vehicleId') || `CAR-${String(index + 1).padStart(4, '0')}`,
     firmName: get('Firm Name', 'Firm name', 'firmName', 'FirmName', 'Firm', 'FIRM NAME'),
@@ -243,30 +282,38 @@ export const mapSheetRowToCar = (row, index) => {
     registrationNo: regNo,
     chassisNo: get('CHASSIS NO.', 'CHASSIS NO', 'Chassis No', 'chassisNo'),
     engineNo: get('ENGINE NO.', 'ENGINE NO', 'Engine No', 'engineNo'),
-    hypothecationBank: get('HYPOTHICATION BANK', 'Hypothecation Bank', 'Hypothication Bank', 'Bank Name', 'hypothecationBank'),
+    valueOfCar: get('VALUE OF CAR', 'Value of Car', 'valueOfCar'),
+    rtoAmount: get('RTO AMOUNT', 'RTO Amount', 'rtoAmount'),
+    hasEmi: isEmi,
+    emiStatus: isEmi ? 'Yes' : 'No',
+    companyMobileNo: get('COMPANY MOBILE NO.', 'COMPANY MOBILE NO', 'Company Mobile No', 'companyMobileNo'),
+    servicePersonName: get('SERVICE PERSON NAME', 'Service Person Name', 'servicePersonName'),
+    servicePersonMobileNo: get('SERVICE PERSON MOBILE NO', 'Service Person Mobile No', 'servicePersonMobileNo'),
+    nameOfOwner: get('Name Of The Owner', 'Name of the Owner', 'nameOfOwner'),
+    pollutionDate: get('Pollution Date', 'pollutionDate'),
+    hasInsurance: isIns,
+    insurance: isIns ? 'Yes' : 'No',
+    copyOfRegistration: get('Copy Of Registration', 'Copy of Registration', 'copyOfRegistration'),
+    // Hypothecation & EMI fields (if also populated from EMI On Vehicle)
+    hypothecationBank: get('HYPOTHICATION BANK', 'Hypothecation Bank', 'Bank Name', 'hypothecationBank'),
     loanAmount: get('LOAN AMOUNT', 'Loan Amount', 'loanAmount', 'Total Loan Amount'),
     emiStartDate: get('EMI START DATE', 'EMI Start Date', 'emiStartDate', 'Loan Start Date'),
-    lastEmiDate: get('LAST EMI DATE', 'Last EMI Date', 'Last Emi Date', 'lastEmiDate'),
-    dateOfReleaseHypothecation: get('DATE OF RELEASE OF HYPOTHICATION', 'Date of Release of Hypothecation', 'Date of Release of Hypothication', 'dateOfReleaseHypothecation'),
-    valueOfCar: get('VALUE OF CAR', 'Value of Car', 'valueOfCar'),
-    emiAmount: get('EMI AMOUNT', 'EMI Amount', 'Emi Amount', 'emiAmount', 'EMI'),
+    lastEmiDate: get('LAST EMI DATE', 'Last EMI Date', 'lastEmiDate'),
+    dateOfReleaseHypothecation: get('DATE OF RELEASE OF HYPOTHICATION', 'Date of Release of Hypothecation', 'dateOfReleaseHypothecation'),
+    emiAmount: get('EMI AMOUNT', 'EMI Amount', 'emiAmount', 'EMI'),
     totalEmis: get('TOTAL EMIS', 'Total EMIs', 'totalEmis', 'Tenure Months', 'Tenure'),
     paidEmis: get('PAID EMIS', 'Paid EMIs', 'paidEmis', 'EMIs Paid'),
     paidEmiAmount: get('PAID EMI AMOUNT', 'Paid EMI Amount', 'paidEmiAmount', 'Total EMI Paid Amount', 'Paid Amount'),
     remainingLoanAmount: get('REMAINING LOAN AMOUNT', 'Remaining Loan Amount', 'remainingLoanAmount', 'Balance Amount', 'Remaining Amount'),
-    emiStatus: get('EMI Status', 'Is EMI', 'EMI (Y/N)', 'Has EMI', 'EMI'),
+    // Insurance additional fields
     insuranceAmount: get('INSURANCE AMOUNT', 'Insurance Amount', 'insuranceAmount'),
-    rtoAmount: get('RTO AMOUNT', 'RTO Amount', 'rtoAmount'),
-    companyMobileNo: get('COMPANY MOBILE NO.', 'COMPANY MOBILE NO', 'Company Mobile No', 'companyMobileNo'),
-    servicePersonName: get('SERVICE PERSON NAME', 'Service Person Name', 'servicePersonName'),
-    servicePersonMobileNo: get('SERVICE PERSON MOBILE NO', 'Service Person Mobile No', 'servicePersonMobileNo'),
     copyOfInsurance: get('Copy Of Insurance', 'Copy of Insurance', 'copyOfInsurance'),
-    copyOfRegistration: get('Copy Of Registration', 'Copy of Registration', 'copyOfRegistration'),
     nameOfCompany: get('Name Of The Company', 'Name of the Company', 'nameOfCompany'),
-    nameOfOwner: get('Name Of The Owner', 'Name of the Owner', 'nameOfOwner'),
     agentName: get('Agent Name', 'agentName'),
     dateOfInsurance: get('Date Of Insurance', 'Date of Insurance', 'dateOfInsurance'),
-    pollutionDate: get('Pollution Date', 'pollutionDate'),
+    vehicleAssignTo: get('Vehicle Assign To', 'Vehicle Assign to', 'vehicleAssignTo', 'Assigned To', 'assignedTo', 'Driver Name', 'driverName'),
+    employeeId: get('Employee ID', 'Employee Id', 'employeeId', 'Emp ID', 'empId'),
+    assigneeMobileNo: get('Assignee Mobile No.', 'Assignee Mobile No', 'Assignee Mobile', 'assigneeMobileNo', 'Driver Mobile', 'Driver Phone'),
     timestamp: get('Timestamp', 'timestamp') || createTimestamp(),
   };
 };
@@ -308,106 +355,135 @@ export const checkHasEmi = (car) => {
   return false;
 };
 
-// ─── MAPPER FOR "Insurance Of Vehicle" SHEET ──────────────────────────────────
-export const mapInsuranceToSheet = (ins) => {
+// ─── MAPPER FOR "Insurance Of Vehicle" SHEET (EXACT 41 COLUMNS) ────────────────
+export const mapInsuranceToSheet = (ins, existingList = []) => {
   const boolToYesNo = (val) => {
     if (val === true || val === 'Yes' || val === 'yes' || val === 'TRUE' || val === 1 || val === '1') return 'Yes';
     return 'No';
   };
 
+  const insuranceId = ins.insuranceId || generateInsuranceId(existingList);
+
   return {
     "Timestamp": ins.timestamp || ins.createdAt || createTimestamp(),
+    "Date": ins.date || ins.dateOfInsurance || '',
+    "Insurance ID": insuranceId,
     "Vehicle ID": ins.vehicleId || '',
-    "Date": ins.date || '',
     "Car Name": ins.carName || '',
     "Name Of Company": ins.nameOfCompany || '',
-    "IDV Value": ins.idvValue || '',
-    "Total Premium To Be Paid": ins.totalPremiumToBePaid || '',
-    "Basic Premium": ins.basicPremium || '',
-    "Third Party Premium": ins.thirdPartyPremium || '',
-    "Add On Premium": ins.addOnPremium || '',
-    "Depreciation Reimbursement": boolToYesNo(ins.depreciationReimbursement),
-    "Engine Secure": boolToYesNo(ins.engineSecure),
-    "Consumable Expenses": boolToYesNo(ins.consumableExpenses),
-    "Lose Of Personal Belonging": boolToYesNo(ins.personalBelonging || ins.loseOfPersonalBelonging),
-    "Roadside Assistances": boolToYesNo(ins.roadsideAssistance || ins.roadsideAssistances),
-    "Key Replacement": boolToYesNo(ins.keyReplacement),
+    "Date Of Insurance": ins.dateOfInsurance || ins.date || '',
+    "Own Damage / Self Accident Details": ins.hasOwnDamage || (ins.basicPremium ? 'Yes' : 'No'),
+    "OD Policy Start Date": ins.odStartDate || ins.date || '',
+    "OD Policy End Date": ins.odEndDate || '',
+    "IDV Value (₹)": ins.idvValue || '',
+    "Own Damage / Basic Premium (₹)": ins.basicPremium || '',
+    "Policy Inclusive of NCB?": ins.policyInclusiveOfNcb || 'No',
+    "NCB Discount Amount (₹)": ins.premiumOfNcb || '',
+    "Cashless Facility Available?": ins.cashlessPolicy || 'Yes',
+    "Add-On Premium (₹)": ins.addOnPremium || '',
+    "ZD (Zero Depreciation)": boolToYesNo(ins.depreciationReimbursement || ins.zd),
+    "EP (Engine Protect)": boolToYesNo(ins.engineSecure || ins.ep),
+    "CM (Consumable Expenses)": boolToYesNo(ins.consumableExpenses || ins.cm),
+    "PB (Loss of Personal Belonging)": boolToYesNo(ins.personalBelonging || ins.pb || ins.loseOfPersonalBelonging),
+    "Roadside Assistance (RSA)": boolToYesNo(ins.roadsideAssistance || ins.rsa || ins.roadsideAssistances),
+    "KP (Key Protect) ": boolToYesNo(ins.keyReplacement || ins.kp),
     "Emergency Transport And Hotel": boolToYesNo(ins.emergencyTransportHotel || ins.emergencyTransportAndHotel),
-    "Tax Amount": ins.taxAmount || '',
-    "Total Premium Amount": ins.totalPremiumAmount || '',
-    "Did We Claim Insurance Last Year": ins.claimedLastYear || ins.didWeClaimInsuranceLastYear || 'No',
-    "Is The Proposed Policy Inclusive Of NCB": ins.policyInclusiveOfNcb || ins.isTheProposedPolicyInclusiveOfNcb || 'No',
-    "What Is Premium Of NCB": ins.premiumOfNcb || ins.whatIsPremiumOfNcb || '',
-    "Is It Cashless Policy": ins.cashlessPolicy || ins.isItCashlessPolicy || 'Yes',
-    "Own Damage / Self Accident": ins.hasOwnDamage || 'No',
-    "OD Start Date": ins.odStartDate || '',
-    "OD End Date": ins.odEndDate || '',
-    "Third Party Insurance": ins.hasThirdParty || 'No',
-    "TP Policy No": ins.tpPolicyNo || '',
-    "TP Start Date": ins.tpStartDate || '',
-    "TP End Date": ins.tpEndDate || '',
-    "TPPD Limit": ins.tppdLimit || '',
-    "Personal Accident Cover": ins.hasPaCover || 'No',
-    "PA Cover Type": ins.paCoverType || '',
-    "PA Sum Insured": ins.paSumInsured || '',
-    "PA Premium": ins.paPremium || '',
-    "PA Start Date": ins.paStartDate || '',
+    "RTI (Return to Invoice)": boolToYesNo(ins.returnToInvoice || ins.rti),
+    "Third Party (TP) Insurance Details": ins.hasThirdParty || (ins.thirdPartyPremium ? 'Yes' : 'No'),
+    "TP Policy Start Date": ins.tpStartDate || ins.date || '',
+    "TP Policy End Date": ins.tpEndDate || '',
+    "3rd Party Premium (₹)": ins.thirdPartyPremium || '',
+    "TP Policy / Certificate No.": ins.tpPolicyNo || '',
+    "TPPD Coverage Limit (₹)": ins.tppdLimit || '750000',
+    "Personal Accident (PA) Cover Details": ins.hasPaCover || (ins.paPremium ? 'Yes' : 'No'),
+    "PA Cover Type": ins.paCoverType || 'Owner-Driver CPA (₹15 Lakhs)',
+    "PA Sum Insured (₹)": ins.paSumInsured || '1500000',
+    "PA Premium (₹)": ins.paPremium || '',
+    "PA Start Date": ins.paStartDate || ins.date || '',
     "PA End Date": ins.paEndDate || '',
-    "PA Nominee Name": ins.paNomineeName || '',
-    "PA Nominee Relation": ins.paNomineeRelation || '',
+    "Nominee Name": ins.paNomineeName || ins.nomineeName || '',
+    "Nominee Relationship": ins.paNomineeRelation || ins.nomineeRelationship || '',
+    "Tax / GST (18%) Amount (₹)": ins.taxAmount || '',
+    "Total Premium Amount (₹)": ins.totalPremiumAmount || ins.totalPremiumToBePaid || '',
+    "Copy Of Insurance": ins.copyOfInsurance?.url || (typeof ins.copyOfInsurance === 'string' ? ins.copyOfInsurance : '') || '',
   };
 };
 
 export const mapSheetRowToInsurance = (row, index) => {
-  const carName = row['Car Name'] || row.carName || '';
-  const date = row['Date'] || row.date || '';
-  const nameOfCompany = row['Name Of Company'] || row['Name of Company'] || row.nameOfCompany || '';
+  if (!row || typeof row !== 'object') return null;
+
+  const get = (...keys) => {
+    for (const k of keys) {
+      if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+        return String(row[k]).trim();
+      }
+      const target = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const [rk, rv] of Object.entries(row)) {
+        if (rk.toLowerCase().replace(/[^a-z0-9]/g, '') === target && rv !== undefined && rv !== null && String(rv).trim() !== '') {
+          return String(rv).trim();
+        }
+      }
+    }
+    return '';
+  };
+
+  const carName = get('Car Name', 'carName', 'Vehicle Name', 'Vehicle');
+  const date = get('Date', 'date', 'Date Of Insurance', 'Date of Insurance');
+  const nameOfCompany = get('Name Of Company', 'Name of Company', 'nameOfCompany', 'Company');
   if (!carName && !date && !nameOfCompany) return null;
 
-  const isYes = (val) => val === 'Yes' || val === 'yes' || val === true || val === 'TRUE';
+  const isYes = (val) => {
+    const s = String(val).toLowerCase().trim();
+    return s === 'yes' || s === 'true' || s === '1';
+  };
+
+  const insId = get('Insurance ID', 'Insurance Id', 'insuranceId') || `INS-${String(index + 1).padStart(4, '0')}`;
 
   return {
     id: row.id || `ins_${index + 1}`,
-    vehicleId: row['Vehicle ID'] || row.vehicleId || '',
+    insuranceId: insId,
+    vehicleId: get('Vehicle ID', 'vehicleId'),
     carName: carName,
     date: date,
     nameOfCompany: nameOfCompany,
-    agentName: row['Agent Name'] || row.agentName || '',
-    idvValue: row['IDV Value'] || row.idvValue || '',
-    totalPremiumToBePaid: row['Total Premium To Be Paid'] || row.totalPremiumToBePaid || '',
-    basicPremium: row['Basic Premium'] || row.basicPremium || '',
-    thirdPartyPremium: row['Third Party Premium'] || row.thirdPartyPremium || '',
-    addOnPremium: row['Add On Premium'] || row.addOnPremium || '',
-    depreciationReimbursement: isYes(row['Depreciation Reimbursement'] || row.depreciationReimbursement),
-    engineSecure: isYes(row['Engine Secure'] || row.engineSecure),
-    consumableExpenses: isYes(row['Consumable Expenses'] || row.consumableExpenses),
-    personalBelonging: isYes(row['Lose Of Personal Belonging'] || row['Loss Of Personal Belonging'] || row.personalBelonging),
-    roadsideAssistance: isYes(row['Roadside Assistances'] || row['Roadside Assistance'] || row.roadsideAssistance),
-    keyReplacement: isYes(row['Key Replacement'] || row.keyReplacement),
-    emergencyTransportHotel: isYes(row['Emergency Transport And Hotel'] || row['Emergency Transport & Hotel'] || row.emergencyTransportHotel),
-    taxAmount: row['Tax Amount'] || row.taxAmount || '',
-    totalPremiumAmount: row['Total Premium Amount'] || row.totalPremiumAmount || '',
-    claimedLastYear: row['Did We Claim Insurance Last Year'] || row.claimedLastYear || 'No',
-    policyInclusiveOfNcb: row['Is The Proposed Policy Inclusive Of NCB'] || row.policyInclusiveOfNcb || 'No',
-    premiumOfNcb: row['What Is Premium Of NCB'] || row.premiumOfNcb || '',
-    cashlessPolicy: row['Is It Cashless Policy'] || row.cashlessPolicy || 'Yes',
-    hasOwnDamage: row['Own Damage / Self Accident'] || row.hasOwnDamage || (row['Basic Premium'] ? 'Yes' : 'No'),
-    odStartDate: row['OD Start Date'] || row.odStartDate || date,
-    odEndDate: row['OD End Date'] || row.odEndDate || '',
-    hasThirdParty: row['Third Party Insurance'] || row.hasThirdParty || (row['Third Party Premium'] ? 'Yes' : 'No'),
-    tpPolicyNo: row['TP Policy No'] || row.tpPolicyNo || '',
-    tpStartDate: row['TP Start Date'] || row.tpStartDate || date,
-    tpEndDate: row['TP End Date'] || row.tpEndDate || '',
-    tppdLimit: row['TPPD Limit'] || row.tppdLimit || '750000',
-    hasPaCover: row['Personal Accident Cover'] || row.hasPaCover || (row['PA Premium'] ? 'Yes' : 'No'),
-    paCoverType: row['PA Cover Type'] || row.paCoverType || 'Owner-Driver CPA (₹15 Lakhs)',
-    paSumInsured: row['PA Sum Insured'] || row.paSumInsured || '1500000',
-    paPremium: row['PA Premium'] || row.paPremium || '',
-    paStartDate: row['PA Start Date'] || row.paStartDate || date,
-    paEndDate: row['PA End Date'] || row.paEndDate || '',
-    paNomineeName: row['PA Nominee Name'] || row.paNomineeName || '',
-    paNomineeRelation: row['PA Nominee Relation'] || row.paNomineeRelation || '',
-    timestamp: row['Timestamp'] || row.timestamp || '',
+    dateOfInsurance: get('Date Of Insurance', 'Date of Insurance', 'dateOfInsurance', 'Date', 'date'),
+    agentName: get('Agent Name', 'agentName'),
+    idvValue: get('IDV Value (₹)', 'IDV Value', 'idvValue'),
+    basicPremium: get('Own Damage / Basic Premium (₹)', 'Basic Premium', 'basicPremium'),
+    policyInclusiveOfNcb: get('Policy Inclusive of NCB?', 'Is The Proposed Policy Inclusive Of NCB', 'policyInclusiveOfNcb') || 'No',
+    premiumOfNcb: get('NCB Discount Amount (₹)', 'What Is Premium Of NCB', 'premiumOfNcb'),
+    cashlessPolicy: get('Cashless Facility Available?', 'Is It Cashless Policy', 'cashlessPolicy') || 'Yes',
+    addOnPremium: get('Add-On Premium (₹)', 'Add On Premium', 'addOnPremium'),
+    depreciationReimbursement: isYes(get('ZD (Zero Depreciation)', 'Depreciation Reimbursement', 'ZD', 'zd')),
+    engineSecure: isYes(get('EP (Engine Protect)', 'Engine Secure', 'EP', 'ep')),
+    consumableExpenses: isYes(get('CM (Consumable Expenses)', 'Consumable Expenses', 'CM', 'cm')),
+    personalBelonging: isYes(get('PB (Loss of Personal Belonging)', 'Lose Of Personal Belonging', 'Loss Of Personal Belonging', 'PB', 'pb')),
+    roadsideAssistance: isYes(get('Roadside Assistance (RSA)', 'Roadside Assistances', 'RSA', 'rsa')),
+    keyReplacement: isYes(get('KP (Key Protect)', 'KP (Key Protect) ', 'Key Replacement', 'KP', 'kp')),
+    emergencyTransportHotel: isYes(get('Emergency Transport And Hotel', 'Emergency Transport & Hotel', 'emergencyTransportHotel')),
+    returnToInvoice: isYes(get('RTI (Return to Invoice)', 'Return To Invoice', 'RTI', 'rti')),
+    hasOwnDamage: get('Own Damage / Self Accident Details', 'Own Damage / Self Accident', 'hasOwnDamage') || (get('Own Damage / Basic Premium (₹)', 'Basic Premium') ? 'Yes' : 'No'),
+    odStartDate: get('OD Policy Start Date', 'OD Start Date', 'odStartDate') || date,
+    odEndDate: get('OD Policy End Date', 'OD End Date', 'odEndDate'),
+    hasThirdParty: get('Third Party (TP) Insurance Details', 'Third Party Insurance', 'hasThirdParty') || (get('3rd Party Premium (₹)', 'Third Party Premium') ? 'Yes' : 'No'),
+    tpStartDate: get('TP Policy Start Date', 'TP Start Date', 'tpStartDate') || date,
+    tpEndDate: get('TP Policy End Date', 'TP End Date', 'tpEndDate'),
+    thirdPartyPremium: get('3rd Party Premium (₹)', 'Third Party Premium', 'thirdPartyPremium'),
+    tpPolicyNo: get('TP Policy / Certificate No.', 'TP Policy No', 'tpPolicyNo'),
+    tppdLimit: get('TPPD Coverage Limit (₹)', 'TPPD Limit', 'tppdLimit') || '750000',
+    hasPaCover: get('Personal Accident (PA) Cover Details', 'Personal Accident Cover', 'hasPaCover') || (get('PA Premium (₹)', 'PA Premium') ? 'Yes' : 'No'),
+    paCoverType: get('PA Cover Type', 'paCoverType') || 'Owner-Driver CPA (₹15 Lakhs)',
+    paSumInsured: get('PA Sum Insured (₹)', 'PA Sum Insured', 'paSumInsured') || '1500000',
+    paPremium: get('PA Premium (₹)', 'PA Premium', 'paPremium'),
+    paStartDate: get('PA Start Date', 'paStartDate') || date,
+    paEndDate: get('PA End Date', 'paEndDate'),
+    paNomineeName: get('Nominee Name', 'PA Nominee Name', 'paNomineeName'),
+    paNomineeRelation: get('Nominee Relationship', 'PA Nominee Relation', 'paNomineeRelation'),
+    taxAmount: get('Tax / GST (18%) Amount (₹)', 'Tax Amount', 'taxAmount'),
+    totalPremiumAmount: get('Total Premium Amount (₹)', 'Total Premium Amount', 'Total Premium To Be Paid', 'totalPremiumAmount'),
+    totalPremiumToBePaid: get('Total Premium Amount (₹)', 'Total Premium To Be Paid', 'totalPremiumToBePaid'),
+    copyOfInsurance: get('Copy Of Insurance', 'Copy of Insurance', 'copyOfInsurance'),
+    timestamp: get('Timestamp', 'timestamp') || createTimestamp(),
   };
 };
 
@@ -947,6 +1023,55 @@ export const syncAllFromSheets = async (silent = false) => {
         }
       }
 
+      // 1b. EMI On Vehicle (merge EMI loan details into cars)
+      const emiSheet = getSheetDataFromRemote(remoteData, ['EMI On Vehicle', 'EMI on Vehicle', 'Vehicle On EMI', 'Vehicle on EMI', 'emionvehicle', 'vehicleonemi', 'emi']);
+      if (emiSheet && Array.isArray(emiSheet.data)) {
+        const currentCars = load(KEYS.CARS);
+        let emiMerged = false;
+        const updatedCars = currentCars.map(car => {
+          const emiRow = emiSheet.data.find(r => {
+            const rowEmiNo = String(r['EMI No'] || r.emiNo || '').trim().toLowerCase();
+            if (rowEmiNo && car.emiNo && rowEmiNo === String(car.emiNo).trim().toLowerCase()) return true;
+
+            const rowReg = String(r['REGISTRATION NO.'] || r['Registration No.'] || r['registrationNo'] || '').trim().toLowerCase();
+            const carReg = String(car.registrationNo || '').trim().toLowerCase();
+            if (rowReg && carReg && rowReg === carReg) return true;
+
+            const rowVid = String(r['Vehicle ID'] || r['vehicleId'] || '').trim().toLowerCase();
+            const carVid = String(car.vehicleId || '').trim().toLowerCase();
+            if (rowVid && carVid && rowVid === carVid) return true;
+
+            // Match by numeric index (e.g. EMI-0002 matches CAR-0002)
+            const emiNum = rowEmiNo.replace(/[^0-9]/g, '');
+            const carNum = String(car.vehicleId || '').replace(/[^0-9]/g, '');
+            return !!(emiNum && carNum && parseInt(emiNum, 10) === parseInt(carNum, 10));
+          });
+          if (!emiRow) return car;
+
+          emiMerged = true;
+          return {
+            ...car,
+            hasEmi: true,
+            emiStatus: 'Yes',
+            emiNo: emiRow['EMI No'] || car.emiNo || '',
+            hypothecationBank: emiRow['HYPOTHICATION BANK'] || emiRow['Hypothecation Bank'] || car.hypothecationBank || '',
+            loanAmount: emiRow['Total Loan Amount (₹)'] || emiRow['LOAN AMOUNT'] || emiRow['Loan Amount'] || car.loanAmount || '',
+            emiAmount: emiRow['Monthly EMI Amount (₹)'] || emiRow['EMI AMOUNT'] || emiRow['EMI Amount'] || car.emiAmount || '',
+            emiStartDate: emiRow['EMI Start Date'] || emiRow['EMI START DATE'] || car.emiStartDate || '',
+            lastEmiDate: emiRow['Last EMI Date'] || emiRow['LAST EMI DATE'] || car.lastEmiDate || '',
+            dateOfReleaseHypothecation: emiRow['DATE OF RELEASE OF HYPOTHICATION'] || car.dateOfReleaseHypothecation || '',
+            totalEmis: emiRow['Total Tenure (Months / Total EMIs)'] || emiRow['TOTAL EMIS'] || emiRow['Total EMIs'] || car.totalEmis || '',
+            paidEmis: emiRow['EMIs Paid So Far (Count)'] || emiRow['PAID EMIS'] || emiRow['Paid EMIs'] || car.paidEmis || '',
+            paidEmiAmount: emiRow['Amount Paid So Far (₹) (अब तक पे किया)'] || emiRow['PAID EMI AMOUNT'] || car.paidEmiAmount || '',
+            remainingLoanAmount: emiRow['Remaining Balance to Pay (₹) (बाकी है)'] || emiRow['REMAINING LOAN AMOUNT'] || car.remainingLoanAmount || '',
+          };
+        });
+        if (emiMerged && JSON.stringify(currentCars) !== JSON.stringify(updatedCars)) {
+          localStorage.setItem(KEYS.CARS, JSON.stringify(updatedCars));
+          changed = true;
+        }
+      }
+
       // 2. Repairs (FMS / Car_Repair) + Vendor Offers + Deliveries + Payments
       const fmsSheet = getSheetDataFromRemote(remoteData, ['FMS', 'Car Repair', 'Car_Repair', 'repairs', 'fms']);
       if (fmsSheet && Array.isArray(fmsSheet.data)) {
@@ -1256,6 +1381,16 @@ export const addCar = async (car) => {
     sheetName: 'Purchase Car Details',
     data: payload
   });
+
+  // Sync to EMI On Vehicle sheet if car has EMI
+  if (carWithTimestamp.hasEmi === true || carWithTimestamp.hasEmi === 'Yes' || carWithTimestamp.emiStatus === 'Yes' || checkHasEmi(carWithTimestamp)) {
+    try {
+      await syncEmiToSheet(carWithTimestamp);
+    } catch (e) {
+      console.warn('EMI On Vehicle sync error:', e);
+    }
+  }
+
   return carWithTimestamp;
 };
 
@@ -1274,6 +1409,16 @@ export const updateCar = async (vehicleId, updates) => {
     keyValue: cars[idx].registrationNo,
     data: payload
   });
+
+  // Sync to EMI On Vehicle sheet if car has EMI
+  if (cars[idx].hasEmi === true || cars[idx].hasEmi === 'Yes' || cars[idx].emiStatus === 'Yes' || checkHasEmi(cars[idx])) {
+    try {
+      await syncEmiToSheet(cars[idx]);
+    } catch (e) {
+      console.warn('EMI On Vehicle sync error:', e);
+    }
+  }
+
   return cars[idx];
 };
 
@@ -1293,6 +1438,20 @@ export const deleteCar = async (vehicleId) => {
       keyValue,
       data: { [keyField]: keyValue }
     });
+
+    if (carToDelete.hasEmi === true || carToDelete.hasEmi === 'Yes' || carToDelete.emiStatus === 'Yes' || checkHasEmi(carToDelete)) {
+      try {
+        await sendToSheet({
+          action: 'delete',
+          sheetName: 'EMI On Vehicle',
+          keyField,
+          keyValue,
+          data: { [keyField]: keyValue }
+        });
+      } catch (e) {
+        console.warn('Delete from EMI On Vehicle error:', e);
+      }
+    }
   }
 };
 
@@ -1305,51 +1464,90 @@ export const getInsurance = async () => {
 export const addInsurance = async (ins) => {
   const all = load(KEYS.INSURANCE);
   const now = createTimestamp();
-  const item = { ...ins, timestamp: now, createdAt: now };
+  const insuranceId = ins.insuranceId || generateInsuranceId(all);
+  const item = { ...ins, insuranceId, timestamp: now, createdAt: now };
   all.push(item);
   save(KEYS.INSURANCE, all);
-  await sendToSheet({ action: 'add', sheetName: 'Insurance Of Vehicle', data: mapInsuranceToSheet(item) });
+  await sendToSheet({ action: 'add', sheetName: 'Insurance Of Vehicle', data: mapInsuranceToSheet(item, all) });
+
+  // Also update vehicle master in Purchase Car Details
+  if (item.vehicleId) {
+    const cars = load(KEYS.CARS);
+    const carIdx = cars.findIndex(c => c.vehicleId === item.vehicleId);
+    if (carIdx !== -1) {
+      cars[carIdx].hasInsurance = true;
+      cars[carIdx].insurance = 'Yes';
+      if (item.date || item.dateOfInsurance) cars[carIdx].dateOfInsurance = item.date || item.dateOfInsurance;
+      if (item.nameOfCompany) cars[carIdx].nameOfCompany = item.nameOfCompany;
+      if (item.totalPremiumAmount || item.totalPremiumToBePaid) {
+        cars[carIdx].insuranceAmount = item.totalPremiumAmount || item.totalPremiumToBePaid;
+      }
+      cars[carIdx].updatedAt = now;
+      save(KEYS.CARS, cars);
+      sendToSheet({
+        action: 'update',
+        sheetName: 'Purchase Car Details',
+        keyField: 'REGISTRATION NO.',
+        keyValue: cars[carIdx].registrationNo,
+        data: mapCarToSheet(cars[carIdx])
+      });
+    }
+  }
+
   return item;
 };
 
 export const updateInsurance = async (id, updates) => {
   const all = load(KEYS.INSURANCE);
-  const idx = all.findIndex(i => i.id === id);
+  const idx = all.findIndex(i => i.id === id || i.insuranceId === id || i.vehicleId === id);
   if (idx === -1) throw new Error('Insurance not found');
-  all[idx] = { ...all[idx], ...updates, updatedAt: createTimestamp() };
+  const insuranceId = all[idx].insuranceId || updates.insuranceId || generateInsuranceId(all);
+  all[idx] = { ...all[idx], ...updates, insuranceId, updatedAt: createTimestamp() };
   save(KEYS.INSURANCE, all);
-  await sendToSheet({ action: 'update', sheetName: 'Insurance Of Vehicle', keyField: 'Car Name', keyValue: all[idx].carName, data: mapInsuranceToSheet(all[idx]) });
+  const keyField = all[idx].insuranceId ? 'Insurance ID' : (all[idx].vehicleId ? 'Vehicle ID' : 'Car Name');
+  const keyValue = all[idx].insuranceId || all[idx].vehicleId || all[idx].carName;
+  await sendToSheet({ action: 'update', sheetName: 'Insurance Of Vehicle', keyField, keyValue, data: mapInsuranceToSheet(all[idx], all) });
   return all[idx];
 };
 
 export const renewInsurance = async (vehicleId, renewalData) => {
   const all = load(KEYS.INSURANCE);
-  const idx = all.findIndex(i => i.vehicleId === vehicleId || i.carName === renewalData.carName);
+  const idx = all.findIndex(i => (vehicleId && i.vehicleId === vehicleId) || (renewalData.insuranceId && i.insuranceId === renewalData.insuranceId) || (renewalData.carName && i.carName === renewalData.carName));
   const now = createTimestamp();
+  const insuranceId = (idx !== -1 && all[idx].insuranceId) ? all[idx].insuranceId : (renewalData.insuranceId || generateInsuranceId(all));
   const updatedRecord = {
     ...(idx !== -1 ? all[idx] : {}),
     ...renewalData,
-    vehicleId,
+    insuranceId,
+    vehicleId: vehicleId || (idx !== -1 ? all[idx].vehicleId : ''),
     timestamp: now,
     updatedAt: now,
   };
   
   if (idx !== -1) {
     all[idx] = updatedRecord;
-    sendToSheet({ action: 'update', sheetName: 'Insurance Of Vehicle', keyField: 'Car Name', keyValue: updatedRecord.carName, data: mapInsuranceToSheet(updatedRecord) });
+    const keyField = updatedRecord.insuranceId ? 'Insurance ID' : (updatedRecord.vehicleId ? 'Vehicle ID' : 'Car Name');
+    const keyValue = updatedRecord.insuranceId || updatedRecord.vehicleId || updatedRecord.carName;
+    sendToSheet({ action: 'update', sheetName: 'Insurance Of Vehicle', keyField, keyValue, data: mapInsuranceToSheet(updatedRecord, all) });
   } else {
     const newId = `ins_${Date.now()}`;
     const newRecord = { ...updatedRecord, id: newId, createdAt: now };
     all.push(newRecord);
-    sendToSheet({ action: 'add', sheetName: 'Insurance Of Vehicle', data: mapInsuranceToSheet(newRecord) });
+    sendToSheet({ action: 'add', sheetName: 'Insurance Of Vehicle', data: mapInsuranceToSheet(newRecord, all) });
   }
   save(KEYS.INSURANCE, all);
   
-  // Also update vehicle's master dateOfInsurance
+  // Also update vehicle's master dateOfInsurance & Insurance of Vehicle = Yes
   const cars = load(KEYS.CARS);
   const carIdx = cars.findIndex(c => c.vehicleId === vehicleId || c.carName === renewalData.carName);
-  if (carIdx !== -1 && renewalData.date) {
-    cars[carIdx].dateOfInsurance = renewalData.date;
+  if (carIdx !== -1) {
+    cars[carIdx].hasInsurance = true;
+    cars[carIdx].insurance = 'Yes';
+    if (renewalData.date) cars[carIdx].dateOfInsurance = renewalData.date;
+    if (renewalData.nameOfCompany) cars[carIdx].nameOfCompany = renewalData.nameOfCompany;
+    if (renewalData.totalPremiumAmount || renewalData.totalPremiumToBePaid) {
+      cars[carIdx].insuranceAmount = renewalData.totalPremiumAmount || renewalData.totalPremiumToBePaid;
+    }
     cars[carIdx].updatedAt = now;
     save(KEYS.CARS, cars);
     sendToSheet({
@@ -1361,6 +1559,46 @@ export const renewInsurance = async (vehicleId, renewalData) => {
     });
   }
   return updatedRecord;
+};
+
+export const syncInsuranceToSheet = async (car, insData = {}) => {
+  if (!car) return;
+  const isIns = car.hasInsurance === 'Yes' || car.hasInsurance === true || car.insurance === 'Yes' || (car.dateOfInsurance && car.dateOfInsurance !== '');
+  if (!isIns) return;
+
+  const allIns = load(KEYS.INSURANCE);
+  const existingIdx = allIns.findIndex(i => (car.vehicleId && i.vehicleId === car.vehicleId) || (car.carName && i.carName === car.carName));
+  const existing = existingIdx !== -1 ? allIns[existingIdx] : null;
+
+  const insuranceId = existing?.insuranceId || insData?.insuranceId || generateInsuranceId(allIns);
+  const mergedIns = {
+    ...(existing || {}),
+    ...insData,
+    insuranceId,
+    vehicleId: car.vehicleId || existing?.vehicleId || '',
+    carName: car.carName || existing?.carName || '',
+    date: insData.date || car.dateOfInsurance || existing?.date || today(),
+    nameOfCompany: insData.nameOfCompany || car.nameOfCompany || existing?.nameOfCompany || '',
+    agentName: insData.agentName || car.agentName || existing?.agentName || '',
+    dateOfInsurance: insData.dateOfInsurance || car.dateOfInsurance || existing?.dateOfInsurance || existing?.date || today(),
+    timestamp: createTimestamp(),
+  };
+
+  if (existingIdx !== -1) {
+    allIns[existingIdx] = mergedIns;
+  } else {
+    allIns.push(mergedIns);
+  }
+  save(KEYS.INSURANCE, allIns);
+
+  const payload = mapInsuranceToSheet(mergedIns, allIns);
+  return await sendToSheet({
+    action: 'update',
+    sheetName: 'Insurance Of Vehicle',
+    keyField: 'Insurance ID',
+    keyValue: payload['Insurance ID'],
+    data: payload
+  });
 };
 
 export const deleteInsurance = async (id) => {
@@ -2061,6 +2299,67 @@ export const getMasterFirmNames = async () => {
     console.warn('Could not fetch Master firm names from sheet, using defaults:', err);
   }
   return DEFAULT_FIRMS;
+};
+
+export const getMasterEmployees = async () => {
+  const DEFAULT_EMPLOYEES = [
+    { code: 'PMMPL-1', name: 'Jayant Kumar Pandey' },
+    { code: 'PMMPL-2', name: 'Jitendra Singh' },
+    { code: 'PMMPL-3', name: 'Hareram Ramkathin Maurya' },
+    { code: 'PMMPL-4', name: 'Laxmikant Nisad' },
+    { code: 'PMMPL-7', name: 'Rajkumar sahu' },
+    { code: 'PMMPL-8', name: 'Anand kumar' },
+    { code: 'PMMPL-9', name: 'Vivek kumar mishra' },
+    { code: 'PMMPL-11', name: 'SK Taiab Ali' },
+    { code: 'PMMPL-13', name: 'Bishnupada Maity' },
+    { code: 'PMMPL-14', name: 'Tara Pada Sana' },
+    { code: 'PMMPL-22', name: 'Mahadev jana' },
+    { code: 'PMMPL-24', name: 'Digambar das manikpuri' },
+    { code: 'PMMPL-26', name: 'Jeevan lal sahu' },
+    { code: 'PMMPL-34', name: 'Devshree Bhawar' },
+    { code: 'PMMPL-46', name: 'Anjali prasad' },
+    { code: 'PMMPL-53', name: 'Kishan Choudhary' },
+    { code: 'PMMPL-64', name: 'Satish kumar banjari' },
+    { code: 'PMMPL-74', name: 'Himani Pandey' },
+    { code: 'PMMPL-78', name: 'Maniram' },
+    { code: 'PMMPL-84', name: 'Ajay Kumar' },
+    { code: 'PMMPL-108', name: 'Suvankar jana' },
+    { code: 'PMMPL-113', name: 'Umesh Singh' },
+    { code: 'PMMPL-116', name: 'Durgesh Kumar Sharma' },
+    { code: 'PMMPL-127', name: 'Harish kumar Verma' },
+    { code: 'PMMPL-130', name: 'Yogeshwar Rao' },
+    { code: 'PMMPL-139', name: 'Soniya Tandan' },
+    { code: 'PMMPL-140', name: 'Ajit Kumar Yadav' },
+    { code: 'PMMPL-144', name: 'Devendra Kumar Verma.' },
+    { code: 'PMMPL-148', name: 'Akash Mirjha' },
+  ];
+
+  try {
+    const remote = await fetchFromSheet('get_Master', 'Master');
+    if (Array.isArray(remote) && remote.length > 0) {
+      const list = [];
+      const seen = new Set();
+      remote.forEach(r => {
+        const name = r['Employee Name'] || r['Employee name'] || r['employeeName'] || r['EMPLOYEE NAME'] || '';
+        const code = r['Employee Code'] || r['Employee code'] || r['employeeCode'] || r['EMPLOYEE CODE'] || r['Employee Id'] || r['Employee ID'] || '';
+        const cleanName = String(name).trim();
+        const cleanCode = String(code).trim();
+        if (cleanName && cleanName !== '.' && cleanName.toLowerCase() !== 'employee name') {
+          const key = `${cleanName}_${cleanCode}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            list.push({ name: cleanName, code: cleanCode });
+          }
+        }
+      });
+      if (list.length > 0) {
+        return list;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not fetch Master employees from sheet, using defaults:', err);
+  }
+  return DEFAULT_EMPLOYEES;
 };
 
 export const getVendorOffers = async () => {

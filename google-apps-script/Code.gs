@@ -51,6 +51,13 @@ function findHeaderRowInfo(sheet) {
     return { headerRowIndex: 6, headers: r6 };
   }
 
+  // "EMI On Vehicle" sheet explicitly uses Row 6 as the header row (data starts at Row 7)
+  if (sName.includes('emi')) {
+    const lastCol = Math.max(sheet.getLastColumn(), 20);
+    const r6 = sheet.getRange(6, 1, 1, lastCol).getValues()[0];
+    return { headerRowIndex: 6, headers: r6 };
+  }
+
   const maxScanRows = Math.min(sheet.getLastRow(), 15);
   if (maxScanRows === 0) return { headerRowIndex: 1, headers: [] };
 
@@ -148,6 +155,18 @@ function doPost(e) {
           return n.includes('insurance of vehicle') || n.includes('insurance_of_vehicle') || n === 'insurance';
         });
         if (found) sheet = found;
+      } else if (sheetName.toLowerCase().includes('emi')) {
+        const found = ss.getSheets().find(s => {
+          const n = s.getName().trim().toLowerCase();
+          return n.includes('emi on vehicle') || n.includes('vehicle on emi') || n.includes('emi');
+        });
+        if (found) sheet = found;
+      } else if (sheetName.toLowerCase().includes('purchase') || sheetName.toLowerCase().includes('car details')) {
+        const found = ss.getSheets().find(s => {
+          const n = s.getName().trim().toLowerCase();
+          return n.includes('purchase car details') || n.includes('purchase car') || n.includes('purchase');
+        });
+        if (found) sheet = found;
       } else if (sheetName.toLowerCase().includes('login') || sheetName.toLowerCase().includes('user')) {
         const found = ss.getSheets().find(s => {
           const n = s.getName().trim().toLowerCase();
@@ -158,7 +177,33 @@ function doPost(e) {
       
       if (!sheet) {
         sheet = ss.insertSheet(sheetName);
-        if (data && typeof data === 'object' && !Array.isArray(data)) {
+        if (sheetName.toLowerCase().includes('purchase')) {
+          const defaultHeaders = [
+            'Timestamp', 'Vehicle ID', 'Firm Name', 'NAME OF CAR / Vehicle', 'DATE OF PURCHASE',
+            'MODEL NO', 'COMPANY PURCHASED FROM', 'FUEL TYPE', 'REGISTRATION NO.', 'CHASSIS NO.',
+            'ENGINE NO.', 'VALUE OF CAR', 'RTO AMOUNT', 'EMI on Vehicle', 'COMPANY MOBILE NO.',
+            'SERVICE PERSON NAME', 'SERVICE PERSON MOBILE NO', 'Name Of The Owner',
+            'Vehicle Assign To', 'Employee Id', 'Pollution Date', 'Insurance of Vehicle', 'Copy Of Registration'
+          ];
+          sheet.appendRow(defaultHeaders);
+        } else if (sheetName.toLowerCase().includes('insurance')) {
+          const defaultInsuranceHeaders = [
+            'Timestamp', 'Date', 'Insurance ID', 'Vehicle ID', 'Car Name', 'Name Of Company',
+            'Date Of Insurance', 'Own Damage / Self Accident Details', 'OD Policy Start Date',
+            'OD Policy End Date', 'IDV Value (₹)', 'Own Damage / Basic Premium (₹)',
+            'Policy Inclusive of NCB?', 'NCB Discount Amount (₹)', 'Cashless Facility Available?',
+            'Add-On Premium (₹)', 'ZD (Zero Depreciation)', 'EP (Engine Protect)',
+            'CM (Consumable Expenses)', 'PB (Loss of Personal Belonging)', 'Roadside Assistance (RSA)',
+            'KP (Key Protect) ', 'Emergency Transport And Hotel', 'RTI (Return to Invoice)',
+            'Third Party (TP) Insurance Details', 'TP Policy Start Date', 'TP Policy End Date',
+            '3rd Party Premium (₹)', 'TP Policy / Certificate No.', 'TPPD Coverage Limit (₹)',
+            'Personal Accident (PA) Cover Details', 'PA Cover Type', 'PA Sum Insured (₹)',
+            'PA Premium (₹)', 'PA Start Date', 'PA End Date', 'Nominee Name',
+            'Nominee Relationship', 'Tax / GST (18%) Amount (₹)', 'Total Premium Amount (₹)',
+            'Copy Of Insurance'
+          ];
+          sheet.appendRow(defaultInsuranceHeaders);
+        } else if (data && typeof data === 'object' && !Array.isArray(data)) {
           sheet.appendRow(Object.keys(data));
         }
       }
@@ -215,6 +260,8 @@ function doPost(e) {
     const sName = sheet.getName().trim().toLowerCase();
     const isFMS = (sName === 'fms' || sName === 'car_repair');
     const isAccidentClaims = sName.includes('accident');
+    const isEmi = sName.includes('emi');
+    const isInsurance = sName.includes('insurance');
 
     // ─── SPECIAL 1: SUBMIT VENDOR OFFER TO FMS ───
     // Col K: Actual 1 | Col M: Photo | Col N: Insurance | Col O: Types | Col P: Garage Name | Col Q: Expected Date
@@ -524,6 +571,39 @@ function doPost(e) {
         }
 
         return createJsonResponse({ status: 'success', action: 'added', row: insertRowIndex, data: processedData });
+      } else if (isEmi) {
+        // 🔒 STRICTLY WRITE COLUMNS A TO L (1 to 12) FOR "EMI On Vehicle" (Data starting at Row 7)
+        let emiNoVal = findValueByHeader(processedData, 'EMI No') || processedData['emiNo'] || '';
+        if (!emiNoVal) {
+          emiNoVal = generateNextEmiNo(sheet, headerRowIndex);
+        }
+
+        const emi12Values = [
+          findValueByHeader(processedData, 'Timestamps') || findValueByHeader(processedData, 'Timestamp') || formatCustomTimestamp(),
+          emiNoVal,
+          findValueByHeader(processedData, 'HYPOTHICATION BANK') || '',
+          findValueByHeader(processedData, 'Total Loan Amount (₹)') || '',
+          findValueByHeader(processedData, 'Monthly EMI Amount (₹)') || '',
+          findValueByHeader(processedData, 'EMI Start Date') || '',
+          findValueByHeader(processedData, 'Last EMI Date') || '',
+          findValueByHeader(processedData, 'DATE OF RELEASE OF HYPOTHICATION') || '',
+          findValueByHeader(processedData, 'Total Tenure (Months / Total EMIs)') || '',
+          findValueByHeader(processedData, 'EMIs Paid So Far (Count)') || '',
+          findValueByHeader(processedData, 'Amount Paid So Far (₹) (अब तक पे किया)') || '',
+          findValueByHeader(processedData, 'Remaining Balance to Pay (₹) (बाकी है)') || ''
+        ];
+        sheet.getRange(insertRowIndex, 1, 1, 12).setValues([emi12Values]);
+        return createJsonResponse({ status: 'success', action: 'added', row: insertRowIndex, emiNo: emiNoVal, data: processedData });
+      } else if (isInsurance) {
+        let insIdVal = findValueByHeader(processedData, 'Insurance ID') || processedData['insuranceId'] || '';
+        if (!insIdVal) {
+          insIdVal = generateNextInsuranceId(sheet, headerRowIndex);
+          processedData['Insurance ID'] = insIdVal;
+          processedData['insuranceId'] = insIdVal;
+        }
+        const rowValues = mapDataToHeaders(processedData, headers, sheet);
+        sheet.getRange(insertRowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+        return createJsonResponse({ status: 'success', action: 'added', row: insertRowIndex, insuranceId: insIdVal, data: processedData });
       } else {
         const rowValues = mapDataToHeaders(processedData, headers, sheet);
         sheet.getRange(insertRowIndex, 1, 1, rowValues.length).setValues([rowValues]);
@@ -549,6 +629,29 @@ function doPost(e) {
       if (headerColIndex !== -1) {
         for (let r = headerRowIndex; r < allRows.length; r++) {
           if (String(allRows[r][headerColIndex]).trim().toLowerCase() === String(keyValue).trim().toLowerCase()) {
+            targetRowIndex = r + 1;
+            break;
+          }
+        }
+      }
+
+      // If not found and it's insurance, search flexibly by Insurance ID, Vehicle ID, or Car Name
+      if (targetRowIndex === -1 && isInsurance) {
+        const vidToFind = normalizeKey(processedData['Vehicle ID'] || processedData['vehicleId'] || '');
+        const insIdToFind = normalizeKey(processedData['Insurance ID'] || processedData['insuranceId'] || '');
+        const carNameToFind = normalizeKey(processedData['Car Name'] || processedData['carName'] || '');
+        let vidCol = -1, insCol = -1, carCol = -1;
+        for (let i = 0; i < headers.length; i++) {
+          const nh = normalizeKey(headers[i]);
+          if (nh === 'vehicleid') vidCol = i;
+          else if (nh === 'insuranceid') insCol = i;
+          else if (nh === 'carname' || nh === 'vehicle') carCol = i;
+        }
+        for (let r = headerRowIndex; r < allRows.length; r++) {
+          const rowVid = vidCol !== -1 ? normalizeKey(allRows[r][vidCol]) : '';
+          const rowInsId = insCol !== -1 ? normalizeKey(allRows[r][insCol]) : '';
+          const rowCar = carCol !== -1 ? normalizeKey(allRows[r][carCol]) : '';
+          if ((insIdToFind && rowInsId === insIdToFind) || (vidToFind && rowVid === vidToFind) || (carNameToFind && rowCar === carNameToFind)) {
             targetRowIndex = r + 1;
             break;
           }
@@ -621,6 +724,24 @@ function doPost(e) {
           }
         }
 
+        return createJsonResponse({ status: 'success', action: 'updated', row: targetRowIndex, data: processedData });
+      } else if (isEmi) {
+        const existingRowData = allRows[targetRowIndex - 1];
+        const emi12Values = [
+          findValueByHeader(processedData, 'Timestamps') || findValueByHeader(processedData, 'Timestamp') || existingRowData[0] || formatCustomTimestamp(),
+          findValueByHeader(processedData, 'EMI No') || existingRowData[1] || '',
+          findValueByHeader(processedData, 'HYPOTHICATION BANK') !== undefined ? findValueByHeader(processedData, 'HYPOTHICATION BANK') : (existingRowData[2] || ''),
+          findValueByHeader(processedData, 'Total Loan Amount (₹)') !== undefined ? findValueByHeader(processedData, 'Total Loan Amount (₹)') : (existingRowData[3] || ''),
+          findValueByHeader(processedData, 'Monthly EMI Amount (₹)') !== undefined ? findValueByHeader(processedData, 'Monthly EMI Amount (₹)') : (existingRowData[4] || ''),
+          findValueByHeader(processedData, 'EMI Start Date') !== undefined ? findValueByHeader(processedData, 'EMI Start Date') : (existingRowData[5] || ''),
+          findValueByHeader(processedData, 'Last EMI Date') !== undefined ? findValueByHeader(processedData, 'Last EMI Date') : (existingRowData[6] || ''),
+          findValueByHeader(processedData, 'DATE OF RELEASE OF HYPOTHICATION') !== undefined ? findValueByHeader(processedData, 'DATE OF RELEASE OF HYPOTHICATION') : (existingRowData[7] || ''),
+          findValueByHeader(processedData, 'Total Tenure (Months / Total EMIs)') !== undefined ? findValueByHeader(processedData, 'Total Tenure (Months / Total EMIs)') : (existingRowData[8] || ''),
+          findValueByHeader(processedData, 'EMIs Paid So Far (Count)') !== undefined ? findValueByHeader(processedData, 'EMIs Paid So Far (Count)') : (existingRowData[9] || ''),
+          findValueByHeader(processedData, 'Amount Paid So Far (₹) (अब तक पे किया)') !== undefined ? findValueByHeader(processedData, 'Amount Paid So Far (₹) (अब तक पे किया)') : (existingRowData[10] || ''),
+          findValueByHeader(processedData, 'Remaining Balance to Pay (₹) (बाकी है)') !== undefined ? findValueByHeader(processedData, 'Remaining Balance to Pay (₹) (बाकी है)') : (existingRowData[11] || '')
+        ];
+        sheet.getRange(targetRowIndex, 1, 1, 12).setValues([emi12Values]);
         return createJsonResponse({ status: 'success', action: 'updated', row: targetRowIndex, data: processedData });
       } else {
         const existingRowData = allRows[targetRowIndex - 1];
@@ -738,6 +859,52 @@ function convertAllBase64ToDriveUrls(dataObj) {
   return result;
 }
 
+function generateNextEmiNo(sheet, headerRowIndex) {
+  try {
+    const allRows = sheet.getDataRange().getValues();
+    let maxNum = 0;
+    const startRow = Math.max(headerRowIndex, 1);
+    for (let r = startRow; r < allRows.length; r++) {
+      const val = String(allRows[r][1] || '').trim(); // Col B is EMI No
+      const match = val.replace(/[^0-9]/g, '');
+      const num = parseInt(match, 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    }
+    return 'EMI-' + String(maxNum + 1).padStart(4, '0');
+  } catch (err) {
+    return 'EMI-' + String(Date.now()).slice(-4);
+  }
+}
+
+function generateNextInsuranceId(sheet, headerRowIndex) {
+  try {
+    const allRows = sheet.getDataRange().getValues();
+    let maxNum = 0;
+    const startRow = Math.max(headerRowIndex, 1);
+    const headers = allRows[startRow - 1] || [];
+    let insColIdx = 2; // Default Col C
+    for (let c = 0; c < headers.length; c++) {
+      if (normalizeKey(headers[c]) === 'insuranceid') {
+        insColIdx = c;
+        break;
+      }
+    }
+    for (let r = startRow; r < allRows.length; r++) {
+      const val = String(allRows[r][insColIdx] || '').trim();
+      const match = val.replace(/[^0-9]/g, '');
+      const num = parseInt(match, 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    }
+    return 'INS-' + String(maxNum + 1).padStart(4, '0');
+  } catch (err) {
+    return 'INS-' + String(Date.now()).slice(-4);
+  }
+}
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function normalizeKey(str) {
   if (!str) return '';
@@ -751,6 +918,12 @@ function findValueByHeader(dataObj, headerName) {
   for (const [k, v] of Object.entries(dataObj)) {
     const normK = normalizeKey(k);
     if (normK === target) return v;
+    // Synonyms for EMI on Vehicle
+    if ((target === 'emionvehicle' || target === 'emiyn' || target === 'emi' || target === 'hasemi' || target === 'emistatus') && 
+        (normK === 'emionvehicle' || normK === 'emiyn' || normK === 'emi' || normK === 'hasemi' || normK === 'emistatus')) return v;
+    // Synonyms for Insurance of Vehicle
+    if ((target === 'insuranceofvehicle' || target === 'insurance' || target === 'hasinsurance') && 
+        (normK === 'insuranceofvehicle' || normK === 'insurance' || normK === 'hasinsurance')) return v;
     // Synonyms for Car / Vehicle
     if ((target === 'vehicle' || target === 'carname' || target === 'vehiclename' || target === 'car') && 
         (normK === 'vehicle' || normK === 'carname' || normK === 'vehiclename' || normK === 'car')) return v;
@@ -763,9 +936,15 @@ function findValueByHeader(dataObj, headerName) {
     // Synonyms for Registration No.
     if ((target === 'registrationno' || target === 'regno' || target === 'registration') && 
         (normK === 'registrationno' || normK === 'regno' || normK === 'registration')) return v;
-    // Synonyms for Driver Name
-    if ((target === 'drivername' || target === 'driver') && 
-        (normK === 'drivername' || normK === 'driver')) return v;
+    // Synonyms for Driver Name / Vehicle Assign To
+    if ((target === 'vehicleassignto' || target === 'assignedto' || target === 'drivername' || target === 'driver') && 
+        (normK === 'vehicleassignto' || normK === 'assignedto' || normK === 'drivername' || normK === 'driver')) return v;
+    // Synonyms for Employee ID
+    if ((target === 'employeeid' || target === 'empid') && 
+        (normK === 'employeeid' || normK === 'empid')) return v;
+    // Synonyms for Assignee Mobile
+    if ((target === 'assigneemobileno' || target === 'assigneemobile' || target === 'drivermobile' || target === 'drivermobileno') && 
+        (normK === 'assigneemobileno' || normK === 'assigneemobile' || normK === 'drivermobile' || normK === 'drivermobileno')) return v;
     // Synonyms for Driver Mobile
     if ((target === 'drivermobile' || target === 'drivermobileno' || target === 'driverphone') && 
         (normK === 'drivermobile' || normK === 'drivermobileno' || normK === 'driverphone')) return v;

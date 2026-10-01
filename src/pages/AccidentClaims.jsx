@@ -1,9 +1,9 @@
 // pages/AccidentClaims.jsx
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Plus, Search, Eye, Edit2, Trash2, X, Wrench, Shield, FileText, User, CheckCircle, Lock, Clock, CheckCircle2, FileCheck, ChevronRight, Layers } from 'lucide-react';
+import { AlertTriangle, Search, Eye, Edit2, Trash2, X, Wrench, Shield, FileText, User, CheckCircle, Lock, Clock, CheckCircle2, FileCheck, ChevronRight, Layers } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getClaims, addClaim, updateClaim, processAccidentClaim, deleteClaim, getRepairs, getCars, getInsurance, onStoreUpdate, syncAllFromSheets } from '../store/dataStore';
+import { getClaims, addClaim, updateClaim, processAccidentClaim, deleteClaim, getRepairs, getCars, getInsurance, onStoreUpdate, syncAllFromSheets, syncPendingRepairClaims } from '../store/dataStore';
 import LoadingOverlay from '../components/ui/LoadingOverlay';
 import { generateClaimNo, generateId } from '../utils/idGenerator';
 import { formatDate, today, toInputDate, calculateExpectedSettlementDate, getClaimTATDays } from '../utils/dateUtils';
@@ -1075,6 +1075,11 @@ const AccidentClaims = ({ defaultStage }) => {
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
+    try {
+      await syncPendingRepairClaims();
+    } catch {
+      // silent fallback
+    }
     const [c, r, cr] = await Promise.all([getClaims(), getRepairs(), getCars()]);
     setClaims(c || []);
     setRepairs(r || []);
@@ -1670,11 +1675,6 @@ const AccidentClaims = ({ defaultStage }) => {
               : 'Claim Settlement'}
           </h1>
         </div>
-        {canEdit && activeStage === 'incident' && (
-          <button className="btn btn-primary" onClick={() => { setSelected(null); setPreselectedRepairNo(null); setModal('add'); }}>
-            <Plus size={16} strokeWidth={2.5} /> New Claim
-          </button>
-        )}
       </div>
 
       {/* 2 Main Status Tabs (Pending Claims & Completed Claims) */}
@@ -1780,12 +1780,7 @@ const AccidentClaims = ({ defaultStage }) => {
               <EmptyState
                 icon={Clock}
                 title="No pending accident claims"
-                message="All claims for this stage have been completed or moved to the next step."
-                action={canEdit && activeStage === 'incident' && (
-                  <button className="btn btn-primary" onClick={() => { setSelected(null); setPreselectedRepairNo(null); setModal('add'); }}>
-                    <Plus size={14} /> New Claim
-                  </button>
-                )}
+                message="All claims for this stage have been completed or moved to the next step. New claims will appear automatically when marked with 'Insurance Claimed: Yes' in Car Repair."
               />
             ) : (
               renderPendingTable(pagedList)
@@ -1815,9 +1810,9 @@ const AccidentClaims = ({ defaultStage }) => {
         />
       </div>
 
-      {/* Add / Edit Claim Modal (Full Form) */}
-      <Modal isOpen={modal === 'add' || modal === 'edit'} onClose={() => { setModal(null); setPreselectedRepairNo(null); }}
-        title={modal === 'edit' ? `Edit Claim — ${selected?.claimNo}` : 'New Accident Claim'} icon={AlertTriangle} size="xl">
+      {/* Edit Claim Modal (Full Form) */}
+      <Modal isOpen={modal === 'edit'} onClose={() => { setModal(null); setPreselectedRepairNo(null); }}
+        title={`Edit Claim — ${selected?.claimNo}`} icon={AlertTriangle} size="xl">
         <ClaimForm claim={selected} claims={claims} repairs={repairs} preselectedRepairNo={preselectedRepairNo}
           onClose={() => { setModal(null); setPreselectedRepairNo(null); }} onSaved={() => { setModal(null); setPreselectedRepairNo(null); handleStageChange('incident'); load(); }} />
       </Modal>

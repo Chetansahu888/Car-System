@@ -95,7 +95,7 @@ const CreateOfferModal = ({ repair, repairTypes, onClose, onSaved }) => {
 
   return (
     <form onSubmit={handleSubmit} style={{ position: 'relative' }}>
-      <LoadingOverlay isVisible={saving} message="Submitting Vendor Offer to Google Sheets & Drive..." />
+      <LoadingOverlay isVisible={saving} message="Please Wait" />
 
       {/* Repair Info Card */}
       <div style={{
