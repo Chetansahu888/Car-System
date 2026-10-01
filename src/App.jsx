@@ -27,8 +27,8 @@ import { initLiveSyncService } from './store/dataStore';
 
 function AppRoutes() {
   useEffect(() => {
-    // Start real-time 2-way background synchronization with Google Sheets
-    const cleanup = initLiveSyncService(6000);
+    // Start real-time 2-way background synchronization with Google Sheets (every 30s)
+    const cleanup = initLiveSyncService(30000);
     return cleanup;
   }, []);
 

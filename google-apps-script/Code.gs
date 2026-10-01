@@ -12,13 +12,14 @@
  * - Formulas in Col L (Delay 1), Col T (Delay 2), Col W (Delay 3) are 100% PROTECTED!
  * =========================================================================
  * If Accident / Insurance Claims Sheet (Row 6 = headers, Row 7+ = data):
- * - Incident Columns: Writes Columns A:F (1 to 6) — Timestamp, Claim No., Repair No.,
- *   Vehicle ID, Car Name, Date of Accident
- * - Formulas in Col G (Planned / 7) and Col I (Delay / 9) are 100% PROTECTED!
- * - Col H (Actual / 8) is set to a client-generated timestamp when Process Claim form is submitted
- * - Process Claim Details: Columns J onwards (10 onwards) — Policy No., Insurance Company,
- *   Estimated Claim Amount (₹), Type Of Claim, Policy Validity, FIR Required?, Survey, Claim Status,
- *   Claim Intimated Date, Claim Intimation No., Survey Date, Settlement Date, Accident Photos, Police Report, Other Documents
+ * - Incident Columns: Writes Columns A:H (1 to 8) — Timestamp, Claim No., Repair No.,
+ *   Vehicle ID, Vehicle, Registration No., Reason For Repair, Department
+ * - Formulas in Col I (Planned / 9) and Col K (Delay / 11) are 100% PROTECTED!
+ * - Col J (Actual / 10) is set to a client-generated timestamp when Process Claim form is submitted
+ * - Process Claim Details: Columns L onwards (12 onwards) — Date of Accident, Accident Location,
+ *   Time of Accident, Driver Name, Driver Mobile, Policy No., Insurance Company,
+ *   Estimated Claim Amount (₹), Type Of Claim, Policy Validity, FIR Required?,
+ *   Claim Settlement Mode, Expected Settlement Date, Accident Photos, Police Report, Other Documents
  * =========================================================================
  * Google Drive Folder:
  * https://drive.google.com/drive/folders/1Ggn-bW9osS62VVJa5W8JRlS3rzyQAGEY
@@ -477,31 +478,45 @@ function doPost(e) {
         sheet.getRange(insertRowIndex, 1, 1, 9).setValues([fms9Values]);
         return createJsonResponse({ status: 'success', action: 'added', row: insertRowIndex, data: processedData });
       } else if (isAccidentClaims) {
-        // 🔒 Accident/Insurance Claims (New Layout from Screenshot):
-        // - Cols A:F (1 to 6): Timestamp, Claim No., Repair No., Vehicle ID, Car Name, Date of Accident
-        // - Col G (Planned / 7) & Col I (Delay / 9): hold formulas and are NEVER touched!
-        // - Col H (Actual / 8): client generated timestamp on submit
-        // - Cols J onwards (10 onwards): Process Claim Details (Policy No., Insurance Company, etc.)
-        const claim6Values = [
+        // 🔒 Accident/Insurance Claims (Layout matching Google Sheet Row 6):
+        // - Incident Columns A:H (1 to 8): Timestamp, Claim No., Repair No., Vehicle ID, Vehicle, Registration No., Reason For Repair, Department
+        // - Col I (Planned / 9) & Col K (Delay / 11): hold formulas and are 100% PROTECTED!
+        // - Col J (Actual / 10): client generated timestamp on claim submission
+        // - Process Claim Details: Columns L onwards (12 onwards): Date of Accident, Accident Location, Time of Accident, Driver Name, Driver Mobile, Policy No., Insurance Company, etc.
+        const claim8Values = [
           findValueByHeader(processedData, 'Timestamp') || formatCustomTimestamp(),
           findValueByHeader(processedData, 'Claim No.') || '',
           findValueByHeader(processedData, 'Repair No.') || '',
           findValueByHeader(processedData, 'Vehicle ID') || '',
-          findValueByHeader(processedData, 'Car Name') || '',
-          findValueByHeader(processedData, 'Date of Accident') || ''
+          findValueByHeader(processedData, 'Vehicle') || findValueByHeader(processedData, 'Car Name') || '',
+          findValueByHeader(processedData, 'Registration No.') || '',
+          findValueByHeader(processedData, 'Reason For Repair') || findValueByHeader(processedData, 'accidentReason') || '',
+          findValueByHeader(processedData, 'Department') || findValueByHeader(processedData, 'Departmen') || ''
         ];
-        sheet.getRange(insertRowIndex, 1, 1, 6).setValues([claim6Values]);
+        sheet.getRange(insertRowIndex, 1, 1, 8).setValues([claim8Values]);
 
-        // Col H (Actual / Col 8): only write when explicitly provided
+        // Col J (Actual / Col 10): only write when explicitly provided
         const actualVal = findValueByHeader(processedData, 'Actual');
         if (actualVal) {
-          sheet.getRange(insertRowIndex, 8).setValue(actualVal);
+          sheet.getRange(insertRowIndex, 10).setValue(actualVal);
         }
 
-        // Process Claim Details columns (Columns 10 onwards: J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X...)
-        for (let c = 10; c <= headers.length; c++) {
+        // Process Claim Details columns (Columns 12 onwards: L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA...)
+        for (let c = 12; c <= headers.length; c++) {
           const headerName = headers[c - 1];
           if (!headerName) continue;
+          const normH = normalizeKey(headerName);
+
+          // 🔒 100% PROTECTED: NEVER OVERWRITE ANY PLANNED OR DELAY COLUMNS!
+          if (normH.indexOf('planned') !== -1 || normH.indexOf('delay') !== -1) continue;
+
+          // For Actual columns (Actual 1, Actual 2, etc.): only write when explicitly sent by client
+          if (normH === 'actual' || normH === 'actual1' || normH === 'actual2') {
+            const actVal = findValueByHeader(processedData, headerName);
+            if (actVal) sheet.getRange(insertRowIndex, c).setValue(actVal);
+            continue;
+          }
+
           const val = findValueByHeader(processedData, headerName);
           if (val !== undefined && val !== null && val !== '') {
             sheet.getRange(insertRowIndex, c).setValue(formatValueForSheet(val));
@@ -561,32 +576,47 @@ function doPost(e) {
         sheet.getRange(targetRowIndex, 1, 1, 9).setValues([fms9Values]);
         return createJsonResponse({ status: 'success', action: 'updated', row: targetRowIndex, data: processedData });
       } else if (isAccidentClaims) {
-        // 🔒 Accident/Insurance Claims (Adjusted layout according to screenshot):
-        // - Incident Columns A:F (1 to 6): Timestamp, Claim No., Repair No., Vehicle ID, Car Name, Date of Accident
-        // - Col G (Planned / 7) & Col I (Delay / 9): hold formulas and are NEVER touched!
-        // - Col H (Actual / 8): write client generated timestamp when process claim is submitted
-        // - Process Claim Details: Col J onwards (10 onwards) dynamically matched by headers
+        // 🔒 Accident/Insurance Claims:
+        // - Incident Columns A:H (1 to 8): Timestamp, Claim No., Repair No., Vehicle ID, Vehicle, Registration No., Reason For Repair, Department
+        // - Col I (Planned / 9) & Col K (Delay / 11): hold formulas and are 100% PROTECTED!
+        // - Col J (Actual / 10): write client generated timestamp when process claim is submitted
+        // - Process Claim Details: Col 12 onwards (L onwards) dynamically matched by headers
         const existingRowData = allRows[targetRowIndex - 1];
-        const claim6Values = [
+        const claim8Values = [
           findValueByHeader(processedData, 'Timestamp') || existingRowData[0] || formatCustomTimestamp(),
           findValueByHeader(processedData, 'Claim No.') || existingRowData[1] || '',
           findValueByHeader(processedData, 'Repair No.') || existingRowData[2] || '',
           findValueByHeader(processedData, 'Vehicle ID') || existingRowData[3] || '',
-          findValueByHeader(processedData, 'Car Name') || existingRowData[4] || '',
-          findValueByHeader(processedData, 'Date of Accident') || existingRowData[5] || ''
+          findValueByHeader(processedData, 'Vehicle') || findValueByHeader(processedData, 'Car Name') || existingRowData[4] || '',
+          findValueByHeader(processedData, 'Registration No.') || existingRowData[5] || '',
+          findValueByHeader(processedData, 'Reason For Repair') || findValueByHeader(processedData, 'accidentReason') || existingRowData[6] || '',
+          findValueByHeader(processedData, 'Department') || findValueByHeader(processedData, 'Departmen') || existingRowData[7] || ''
         ];
-        sheet.getRange(targetRowIndex, 1, 1, 6).setValues([claim6Values]);
+        sheet.getRange(targetRowIndex, 1, 1, 8).setValues([claim8Values]);
 
-        // Col H (Actual / Col 8): only overwrite when the client explicitly sends an Actual value
+        // Col J (Actual / Col 10): only overwrite when the client explicitly sends an Actual value
         const actualVal = findValueByHeader(processedData, 'Actual');
-        if (actualVal) sheet.getRange(targetRowIndex, 8).setValue(actualVal);
+        if (actualVal) sheet.getRange(targetRowIndex, 10).setValue(actualVal);
 
-        // Process Claim Details columns (Columns 10 onwards: J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X...)
-        for (let c = 10; c <= headers.length; c++) {
+        // Process Claim Details columns (Columns 12 onwards: L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA...)
+        for (let c = 12; c <= headers.length; c++) {
           const headerName = headers[c - 1];
           if (!headerName) continue;
+          const normH = normalizeKey(headerName);
+
+          // 🔒 100% PROTECTED: NEVER OVERWRITE ANY PLANNED OR DELAY COLUMNS!
+          // This includes Planned, Planned 1, Planned 2, Delay, Delay 1, Delay 2, etc. Formulas must remain untouched!
+          if (normH.indexOf('planned') !== -1 || normH.indexOf('delay') !== -1) continue;
+
+          // For Actual columns (Actual 1, Actual 2, etc.): only write when explicitly sent by client
+          if (normH === 'actual' || normH === 'actual1' || normH === 'actual2') {
+            const actVal = findValueByHeader(processedData, headerName);
+            if (actVal) sheet.getRange(targetRowIndex, c).setValue(actVal);
+            continue;
+          }
+
           const val = findValueByHeader(processedData, headerName);
-          if (val !== undefined && val !== null && val !== '') {
+          if (val !== undefined && val !== null) {
             sheet.getRange(targetRowIndex, c).setValue(formatValueForSheet(val));
           }
         }
@@ -623,8 +653,11 @@ function doPost(e) {
             if (isFMS) {
               sheet.getRange(r + 1, 1, 1, Math.max(sheet.getLastColumn(), 35)).clearContent();
             } else if (isAccidentClaims) {
-              sheet.getRange(r + 1, 1, 1, 11).clearContent();
-              sheet.getRange(r + 1, 13).clearContent();
+              sheet.getRange(r + 1, 1, 1, 8).clearContent();
+              sheet.getRange(r + 1, 10).clearContent();
+              if (sheet.getLastColumn() >= 12) {
+                sheet.getRange(r + 1, 12, 1, sheet.getLastColumn() - 11).clearContent();
+              }
             } else {
               sheet.deleteRow(r + 1);
             }
@@ -716,7 +749,89 @@ function findValueByHeader(dataObj, headerName) {
   if (dataObj[headerName] !== undefined) return dataObj[headerName];
   const target = normalizeKey(headerName);
   for (const [k, v] of Object.entries(dataObj)) {
-    if (normalizeKey(k) === target) return v;
+    const normK = normalizeKey(k);
+    if (normK === target) return v;
+    // Synonyms for Car / Vehicle
+    if ((target === 'vehicle' || target === 'carname' || target === 'vehiclename' || target === 'car') && 
+        (normK === 'vehicle' || normK === 'carname' || normK === 'vehiclename' || normK === 'car')) return v;
+    // Synonyms for Reason For Repair
+    if ((target === 'reasonforrepair' || target === 'accidentreason' || target === 'reason') && 
+        (normK === 'reasonforrepair' || normK === 'accidentreason' || normK === 'reason')) return v;
+    // Synonyms for Department
+    if ((target === 'department' || target === 'departmen' || target === 'dept') && 
+        (normK === 'department' || normK === 'departmen' || normK === 'dept')) return v;
+    // Synonyms for Registration No.
+    if ((target === 'registrationno' || target === 'regno' || target === 'registration') && 
+        (normK === 'registrationno' || normK === 'regno' || normK === 'registration')) return v;
+    // Synonyms for Driver Name
+    if ((target === 'drivername' || target === 'driver') && 
+        (normK === 'drivername' || normK === 'driver')) return v;
+    // Synonyms for Driver Mobile
+    if ((target === 'drivermobile' || target === 'drivermobileno' || target === 'driverphone') && 
+        (normK === 'drivermobile' || normK === 'drivermobileno' || normK === 'driverphone')) return v;
+    // Synonyms for Date of Accident
+    if ((target === 'dateofaccident' || target === 'accidentdate') && 
+        (normK === 'dateofaccident' || normK === 'accidentdate')) return v;
+    // Synonyms for Accident Location
+    if ((target === 'accidentlocation' || target === 'location') && 
+        (normK === 'accidentlocation' || normK === 'location')) return v;
+    // Synonyms for Time of Accident
+    if ((target === 'timeofaccident' || target === 'accidenttime') && 
+        (normK === 'timeofaccident' || normK === 'accidenttime')) return v;
+    // Synonyms for Claim Settlement Mode
+    if ((target === 'claimsettlementmode' || target === 'claimmode' || target === 'settlementmode') && 
+        (normK === 'claimsettlementmode' || normK === 'claimmode' || normK === 'settlementmode')) return v;
+    // Synonyms for Expected Settlement Date
+    if ((target === 'expectedsettlementdate' || target === 'expectedsettlement' || target === 'expecteddate') && 
+        (normK === 'expectedsettlementdate' || normK === 'expectedsettlement' || normK === 'expecteddate')) return v;
+    // Synonyms for Claim Intimated Date
+    if ((target === 'claimintimateddate' || target === 'claimintimated' || target === 'claimintmateddate') && 
+        (normK === 'claimintimateddate' || normK === 'claimintimated' || normK === 'claimintmateddate')) return v;
+    // Synonyms for Claim Intimation No. / Ticket
+    if ((target === 'claimintimationnoticket' || target === 'claimintimationno' || target === 'claimintimation' || target === 'ticket') && 
+        (normK === 'claimintimationnoticket' || normK === 'claimintimationno' || normK === 'claimintimation' || normK === 'ticket')) return v;
+    // Synonyms for Surveyor Name
+    if ((target === 'surveyorname' || target === 'surveyor') && 
+        (normK === 'surveyorname' || normK === 'surveyor')) return v;
+    // Synonyms for Surveyor Mobile
+    if ((target === 'surveyormobileno' || target === 'surveyormobile' || target === 'surveyorcontact' || target === 'surveyorphone') && 
+        (normK === 'surveyormobileno' || normK === 'surveyormobile' || normK === 'surveyorcontact' || normK === 'surveyorphone')) return v;
+    // Synonyms for Survey Status
+    if ((target === 'surveystatus' || target === 'survey') && 
+        (normK === 'surveystatus' || normK === 'survey')) return v;
+    // Synonyms for Claim Current Status
+    if ((target === 'claimcurrentstatus' || target === 'claimstatus') && 
+        (normK === 'claimcurrentstatus' || normK === 'claimstatus')) return v;
+    // Synonyms for Survey Assessment & Inspection Remarks
+    if ((target === 'surveyassessmentinspectionremarks' || target === 'surveyremarks' || target === 'remarks') && 
+        (normK === 'surveyassessmentinspectionremarks' || normK === 'surveyremarks' || normK === 'remarks')) return v;
+    // Synonyms for Survey Report / Documents
+    if ((target === 'surveyreportdocuments' || target === 'surveyreport' || target === 'otherdocuments' || target === 'documents') && 
+        (normK === 'surveyreportdocuments' || normK === 'surveyreport' || normK === 'otherdocuments' || normK === 'documents')) return v;
+    // Synonyms for Actual 1 & Actual 2
+    if ((target === 'actual1' || target === 'actualdate1') && (normK === 'actual1' || normK === 'actualdate1')) return v;
+    if ((target === 'actual2' || target === 'actualdate2') && (normK === 'actual2' || normK === 'actualdate2')) return v;
+    // Synonyms for Final Approved Claim Amount (₹)
+    if ((target === 'finalapprovedclaimamount' || target === 'claimapprovedamount' || target === 'approvedamount') && 
+        (normK === 'finalapprovedclaimamount' || normK === 'claimapprovedamount' || normK === 'approvedamount')) return v;
+    // Synonyms for Actual Settlement Date
+    if ((target === 'actualsettlementdate' || target === 'settlementdate' || target === 'claimsettlementdate') && 
+        (normK === 'actualsettlementdate' || normK === 'settlementdate' || normK === 'claimsettlementdate')) return v;
+    // Synonyms for Claim Final Status
+    if ((target === 'claimfinalstatus' || target === 'finalstatus' || target === 'claimstatus') && 
+        (normK === 'claimfinalstatus' || normK === 'finalstatus' || normK === 'claimstatus')) return v;
+    // Synonyms for Settlement / Payout Mode
+    if ((target === 'settlementpayoutmode' || target === 'settlementmode' || target === 'payoutmode' || target === 'settlementpaymentmode') && 
+        (normK === 'settlementpayoutmode' || normK === 'settlementmode' || normK === 'payoutmode' || normK === 'settlementpaymentmode')) return v;
+    // Synonyms for Payment Ref. / UTR No.
+    if ((target === 'paymentrefutrno' || target === 'paymentrefno' || target === 'utrno' || target === 'settlementrefno' || target === 'paymentref') && 
+        (normK === 'paymentrefutrno' || normK === 'paymentrefno' || normK === 'utrno' || normK === 'settlementrefno' || normK === 'paymentref')) return v;
+    // Synonyms for Settlement Closure Remarks
+    if ((target === 'settlementclosureremarks' || target === 'settlementremarks' || target === 'closureremarks') && 
+        (normK === 'settlementclosureremarks' || normK === 'settlementremarks' || normK === 'closureremarks')) return v;
+    // Synonyms for Payment Receipt / Payment File / Payment Proof
+    if ((target === 'paymentreceipt' || target === 'paymentfile' || target === 'paymentproof' || target === 'paymentdocument' || target === 'receipt') && 
+        (normK === 'paymentreceipt' || normK === 'paymentfile' || normK === 'paymentproof' || normK === 'paymentdocument' || normK === 'receipt')) return v;
   }
   return undefined;
 }

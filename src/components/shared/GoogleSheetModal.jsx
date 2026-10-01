@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { getScriptUrl, setScriptUrl, testConnection } from '../../api/googleSheetsClient';
 import { syncAllFromSheets } from '../../store/dataStore';
 import Modal from '../ui/Modal';
+import codeGsRaw from '../../../google-apps-script/Code.gs?raw';
 
 export default function GoogleSheetModal({ isOpen, onClose }) {
   const [url, setUrl] = useState('');
@@ -65,152 +66,9 @@ export default function GoogleSheetModal({ isOpen, onClose }) {
   };
 
   const handleCopyScript = () => {
-    const scriptCode = `/**
- * CAR FLEET MANAGEMENT SYSTEM — GOOGLE APPS SCRIPT
- * Paste this into Google Sheet Extensions > Apps Script and Deploy as Web App!
- */
-const SHEET_NAMES = {
-  CARS: 'Purchase_Car',
-  INSURANCE: 'Insurance',
-  REPAIRS: 'Car_Repair',
-  CLAIMS: 'Accident_Claims',
-  VENDOR_OFFERS: 'Vendor_Offers',
-  DELIVERY_PLANNING: 'Delivery_Planning',
-  DELIVERIES: 'Delivery_Car',
-  PAYMENTS: 'Payment'
-};
-
-const HEADERS = {
-  [SHEET_NAMES.CARS]: ['vehicleId', 'carName', 'dateOfPurchase', 'modelNo', 'companyPurchasedFrom', 'fuelType', 'registrationNo', 'chassisNo', 'engineNo', 'hypothecationBank', 'lastEmiDate', 'dateOfReleaseHypothecation', 'valueOfCar', 'emiAmount', 'insuranceAmount', 'rtoAmount', 'companyMobileNo', 'servicePersonName', 'servicePersonMobileNo', 'copyOfInsurance', 'copyOfRegistration', 'nameOfCompany', 'nameOfOwner', 'agentName', 'dateOfInsurance', 'pollutionDate', 'createdAt'],
-  [SHEET_NAMES.INSURANCE]: ['id', 'vehicleId', 'carName', 'nameOfCompany', 'idvValue', 'totalPremiumToBePaid', 'basicPremium', 'thirdPartyPremium', 'addOnPremium', 'depreciationReimbursement', 'engineSecure', 'consumableExpenses', 'personalBelonging', 'roadsideAssistance', 'keyReplacement', 'emergencyTransportHotel', 'taxAmount', 'totalPremiumAmount', 'claimedLastYear', 'policyInclusiveOfNcb', 'premiumOfNcb', 'cashlessPolicy', 'date', 'validityDate', 'renewalDate', 'createdAt', 'updatedAt'],
-  [SHEET_NAMES.REPAIRS]: ['id', 'repairNo', 'vehicleId', 'carName', 'reasonForRepair', 'garage', 'whoTakingCar', 'insuranceToBeClaimed', 'department', 'repairStatus', 'timestamp', 'createdAt', 'updatedAt'],
-  [SHEET_NAMES.CLAIMS]: ['id', 'claimNo', 'repairNo', 'vehicleId', 'vehicleName', 'registrationNo', 'dateOfAccident', 'timeOfAccident', 'accidentLocation', 'accidentReason', 'driverName', 'driverMobileNo', 'insuranceCompany', 'policyNo', 'policyValidity', 'insuranceClaim', 'estimatedClaimAmount', 'accidentPhotos', 'firRequired', 'firCopy', 'policeReport', 'otherDocuments', 'claimIntimatedDate', 'claimIntimationNo', 'surveyorName', 'surveyorMobileNo', 'surveyDate', 'surveyStatus', 'claimStatus', 'claimApprovedAmount', 'claimRejectedReason', 'claimSettlementDate', 'remarks', 'createdAt', 'updatedAt'],
-  [SHEET_NAMES.VENDOR_OFFERS]: ['id', 'repairNo', 'vehicleId', 'photoOfOffer', 'insurance', 'typesOfRepair', 'approvalStatus', 'rejectionReason', 'approvedAt', 'rejectedAt', 'timestamp', 'createdAt'],
-  [SHEET_NAMES.DELIVERY_PLANNING]: ['id', 'repairNo', 'vehicleId', 'garageName', 'vehicleName', 'dateVehicleReceived', 'kmAtTimeOfRepair', 'repairWorkDone', 'partsAmount', 'serviceAmount', 'insuranceClaimed', 'insuranceAmount', 'billAmount', 'billImage', 'createdAt'],
-  [SHEET_NAMES.DELIVERIES]: ['id', 'repairNo', 'vehicleId', 'garageName', 'vehicleName', 'dateVehicleReceived', 'kmAtTimeOfRepair', 'repairWorkDone', 'partsAmount', 'serviceAmount', 'insuranceClaimed', 'insuranceAmount', 'billAmount', 'billImage', 'deliveryStatus', 'submittedAt', 'createdAt'],
-  [SHEET_NAMES.PAYMENTS]: ['id', 'repairNo', 'vehicleId', 'garageName', 'vehicleName', 'dateVehicleReceived', 'kmAtTimeOfRepair', 'serviceAmount', 'billAmount', 'billImage', 'paymentStatus', 'timestamp', 'createdAt', 'updatedAt']
-};
-
-function getOrCreateSheet(ss, name) {
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-    const headers = HEADERS[name];
-    if (headers && headers.length > 0) {
-      sheet.appendRow(headers);
-      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#ecfdf5').setFontColor('#065f46');
-      sheet.setFrozenRows(1);
-    }
-  }
-  return sheet;
-}
-
-function sheetToObjects(sheet) {
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return [];
-  const headers = data[0];
-  const rows = data.slice(1);
-  return rows.map((row, rowIdx) => {
-    const obj = { _row: rowIdx + 2 };
-    headers.forEach((h, i) => {
-      let val = row[i];
-      if (val instanceof Date) {
-        val = Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-      }
-      if (typeof val === 'string' && (val.startsWith('[') || val.startsWith('{'))) {
-        try { val = JSON.parse(val); } catch (e) {}
-      }
-      obj[h] = val;
-    });
-    return obj;
-  });
-}
-
-function objectToRow(obj, headers) {
-  return headers.map(h => {
-    const val = obj[h];
-    if (val === undefined || val === null) return '';
-    if (typeof val === 'object') return JSON.stringify(val);
-    return val;
-  });
-}
-
-function createJsonResponse(data) {
-  return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
-}
-
-function doGet(e) {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const action = e?.parameter?.action || 'getAll';
-    if (action === 'ping') {
-      return createJsonResponse({ status: 'ok', message: 'Car Fleet System API connected successfully', timestamp: new Date().toISOString() });
-    }
-    if (action === 'getAll') {
-      const result = {};
-      Object.keys(SHEET_NAMES).forEach(key => {
-        const name = SHEET_NAMES[key];
-        const sheet = getOrCreateSheet(ss, name);
-        result[key.toLowerCase()] = sheetToObjects(sheet);
-      });
-      return createJsonResponse({ status: 'success', data: result });
-    }
-    return createJsonResponse({ status: 'error', message: 'Unknown action' });
-  } catch (err) {
-    return createJsonResponse({ status: 'error', message: err.toString() });
-  }
-}
-
-function doPost(e) {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let body = {};
-    if (e.postData && e.postData.contents) {
-      body = JSON.parse(e.postData.contents);
-    }
-    const { action, sheetName, data, keyField, keyValue } = body;
-    const targetSheetName = sheetName || SHEET_NAMES[body.target];
-    if (!targetSheetName) return createJsonResponse({ status: 'error', message: 'Sheet name required' });
-    const sheet = getOrCreateSheet(ss, targetSheetName);
-    const headers = HEADERS[targetSheetName] || sheet.getDataRange().getValues()[0];
-
-    if (action === 'add' || action === 'insert') {
-      sheet.appendRow(objectToRow(data, headers));
-      return createJsonResponse({ status: 'success', data });
-    }
-    if (action === 'update') {
-      const allRows = sheet.getDataRange().getValues();
-      const colIdx = headers.indexOf(keyField);
-      let foundRow = -1;
-      for (let i = 1; i < allRows.length; i++) {
-        if (String(allRows[i][colIdx]) === String(keyValue)) { foundRow = i + 1; break; }
-      }
-      if (foundRow === -1) {
-        sheet.appendRow(objectToRow(data, headers));
-        return createJsonResponse({ status: 'success', data });
-      }
-      const existingData = sheetToObjects(sheet).find(r => String(r[keyField]) === String(keyValue)) || {};
-      const merged = { ...existingData, ...data };
-      sheet.getRange(foundRow, 1, 1, headers.length).setValues([objectToRow(merged, headers)]);
-      return createJsonResponse({ status: 'success', data: merged });
-    }
-    if (action === 'delete') {
-      const allRows = sheet.getDataRange().getValues();
-      const colIdx = headers.indexOf(keyField);
-      for (let i = 1; i < allRows.length; i++) {
-        if (String(allRows[i][colIdx]) === String(keyValue)) { sheet.deleteRow(i + 1); break; }
-      }
-      return createJsonResponse({ status: 'success', deleted: true });
-    }
-    return createJsonResponse({ status: 'error', message: 'Unknown action' });
-  } catch (err) {
-    return createJsonResponse({ status: 'error', message: err.toString() });
-  }
-}`;
-
-    navigator.clipboard.writeText(scriptCode);
+    navigator.clipboard.writeText(codeGsRaw);
     setCopied(true);
-    toast.success('Apps Script code copied to clipboard!');
+    toast.success('Latest Apps Script code (Code.gs) copied to clipboard!');
     setTimeout(() => setCopied(false), 3000);
   };
 

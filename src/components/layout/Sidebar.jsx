@@ -41,9 +41,9 @@ const NAV_GROUPS = [
         badgeKey: 'claims',
         pageKey: PAGE_KEYS.ACCIDENT_CLAIMS,
         children: [
-          { to: '/accident-claims/claim-of-accident', label: 'Claim of accident', stage: 'incident', badgeKey: 'claimsIncident' },
-          { to: '/accident-claims/process-of-claim', label: 'Process of claim', stage: 'process', badgeKey: 'claimsProcess' },
-          { to: '/accident-claims/claim-settlement', label: 'Claim settlement', stage: 'settlement', badgeKey: 'claimsSettled' },
+          { to: '/accident-claims/claim-of-accident', label: 'Claim of Accident', stage: 'incident', badgeKey: 'claimsIncident' },
+          { to: '/accident-claims/process-of-claim', label: 'Process of Claim', stage: 'process', badgeKey: 'claimsProcess' },
+          { to: '/accident-claims/claim-settlement', label: 'Claim Settlement', stage: 'settlement', badgeKey: 'claimsSettled' },
         ]
       },
     ],

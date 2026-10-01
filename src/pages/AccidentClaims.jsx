@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Plus, Search, Eye, Edit2, Trash2, X, Wrench, Shield, FileText, User, CheckCircle, Lock, Clock, CheckCircle2, FileCheck, ChevronRight, Layers } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getClaims, addClaim, updateClaim, processAccidentClaim, deleteClaim, getRepairs, getCars, getInsurance, onStoreUpdate } from '../store/dataStore';
+import { getClaims, addClaim, updateClaim, processAccidentClaim, deleteClaim, getRepairs, getCars, getInsurance, onStoreUpdate, syncAllFromSheets } from '../store/dataStore';
 import LoadingOverlay from '../components/ui/LoadingOverlay';
 import { generateClaimNo, generateId } from '../utils/idGenerator';
 import { formatDate, today, toInputDate, calculateExpectedSettlementDate, getClaimTATDays } from '../utils/dateUtils';
@@ -27,7 +27,7 @@ const EMPTY_CLAIM = {
   dateOfAccident: '', timeOfAccident: '', accidentLocation: '', accidentReason: '',
   policyValidity: '', insuranceClaim: 'Yes', estimatedClaimAmount: '',
   typeOfClaim: 'Own Damage', claimMode: 'Cashless Claim (Network Garage)',
-  accidentPhotos: null, firRequired: 'No', firCopy: null, policeReport: null, otherDocuments: null,
+  accidentPhotos: null, firRequired: 'No', firCopy: null, policeReport: null, otherDocuments: null, paymentReceipt: null,
   claimIntimatedDate: '', claimIntimationNo: '', surveyorName: '', surveyorMobileNo: '',
   surveyDate: '', surveyStatus: 'Pending', claimStatus: 'Claim Not Intimated',
   expectedSettlementDate: '',
@@ -46,10 +46,18 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
     return '';
   };
   const initialType = isEdit ? (claim.typeOfClaim || 'Own Damage') : 'Own Damage';
-  const initialMode = isEdit ? (claim.claimMode || 'Cashless Claim (Network Garage)') : 'Cashless Claim (Network Garage)';
-  const initialExpDate = isEdit
-    ? (claim.expectedSettlementDate || calculateExpectedSettlementDate(claim.claimIntimatedDate || claim.dateOfAccident || today(), initialMode))
-    : calculateExpectedSettlementDate(today(), initialMode);
+  const initialMode = (isEdit && claim.claimMode && (claim.claimMode.includes('Cashless') || claim.claimMode.includes('Reimbursement')))
+    ? claim.claimMode
+    : 'Cashless Claim (Network Garage)';
+  const baseAccidentDate = isEdit ? (claim.dateOfAccident || claim.claimIntimatedDate || today()) : today();
+  const isExpValid = claim?.expectedSettlementDate && /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(claim.expectedSettlementDate);
+  const isExpSameAsAccident = isExpValid && (
+    formatDate(claim.expectedSettlementDate) === formatDate(baseAccidentDate) ||
+    toInputDate(claim.expectedSettlementDate) === toInputDate(baseAccidentDate)
+  );
+  const initialExpDate = (isEdit && isExpValid && !isExpSameAsAccident)
+    ? claim.expectedSettlementDate
+    : calculateExpectedSettlementDate(baseAccidentDate, initialMode);
 
   const [form, setForm] = useState(isEdit
     ? { ...claim, vehicleId: getInitialVehicleId(), typeOfClaim: initialType, claimMode: initialMode, expectedSettlementDate: initialExpDate }
@@ -82,13 +90,13 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
       registrationNo: repair?.registrationNo || f.registrationNo || '',
       dateOfAccident: baseD,
       accidentReason: f.accidentReason || repair?.reasonForRepair || '',
-      accidentLocation: f.accidentLocation || repair?.garage || '',
+      accidentLocation: f.accidentLocation || '',
       driverName: f.driverName || repair?.whoTakingCar || '',
       insuranceCompany: f.insuranceCompany || repair?.insuranceCompany || insComp,
       estimatedClaimAmount: f.estimatedClaimAmount || repair?.estimatedClaimAmount || '',
       typeOfClaim: selType,
       claimMode: selMode,
-      expectedSettlementDate: f.expectedSettlementDate || expD,
+      expectedSettlementDate: expD,
     }));
   };
 
@@ -137,7 +145,7 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
 
   return (
     <form onSubmit={handleSubmit} style={{ position: 'relative' }}>
-      <LoadingOverlay isVisible={saving} message={isEdit ? "Updating Claim in Google Sheet..." : "Registering Claim in Google Sheet..."} />
+      <LoadingOverlay isVisible={saving} />
       {isEdit && (
         <div style={{ padding: '10px 16px', background: '#ffedd5', borderRadius: 12, border: '1px solid #fed7aa', marginBottom: 20, fontSize: 13.5, color: '#c2410c', fontWeight: 700 }}>
           📋 Claim No: <span style={{ color: '#0f172a' }}>{claim.claimNo}</span>
@@ -246,7 +254,7 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
               const val = e.target.value;
               const baseD = form.claimIntimatedDate || form.dateOfAccident || today();
               const expD = calculateExpectedSettlementDate(baseD, val);
-              setForm(f => ({ ...f, claimMode: val, expectedSettlementDate: expD || f.expectedSettlementDate }));
+              setForm(f => ({ ...f, claimMode: val, expectedSettlementDate: expD }));
             }}
           >
             {CLAIM_MODES.map(m => <option key={m} value={m}>{m}</option>)}
@@ -268,84 +276,6 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
             <option value="No">No</option>
             <option value="Yes">Yes</option>
           </select>
-        </div>
-      </div>
-
-      <div className="form-section-header">
-        <div className="form-section-icon"><CheckCircle size={18} strokeWidth={2.2} /></div>
-        <div className="form-section-title">Survey & Processing Status</div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-        <div className="form-group">
-          <label className="form-label">Claim Intimated Date</label>
-          <input type="date" className="form-input" value={form.claimIntimatedDate} onChange={e => set('claimIntimatedDate', e.target.value)} />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Claim Intimation No.</label>
-          <input className="form-input" value={form.claimIntimationNo} onChange={e => set('claimIntimationNo', e.target.value)} />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Surveyor Name</label>
-          <input className="form-input" value={form.surveyorName} onChange={e => set('surveyorName', e.target.value)} />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Surveyor Mobile</label>
-          <input className="form-input" value={form.surveyorMobileNo} onChange={e => set('surveyorMobileNo', e.target.value)} />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Survey Date</label>
-          <input type="date" className="form-input" value={form.surveyDate} onChange={e => set('surveyDate', e.target.value)} />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Survey Status</label>
-          <select className="form-select" value={form.surveyStatus} onChange={e => set('surveyStatus', e.target.value)}>
-            {SURVEY_STATUS.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-        <div className="form-group">
-          <label className="form-label">Claim Status</label>
-          <select className="form-select" value={form.claimStatus} onChange={e => set('claimStatus', e.target.value)}>
-            {CLAIM_STATUS_STEPS.map(s => <option key={s} value={s}>{s}</option>)}
-            <option value="Rejected">Rejected</option>
-          </select>
-        </div>
-        {form.claimStatus === 'Approved' || form.claimStatus === 'Settled' ? (
-          <div className="form-group">
-            <label className="form-label">Claim Approved Amount (₹)</label>
-            <input type="number" className="form-input" value={form.claimApprovedAmount} onChange={e => set('claimApprovedAmount', e.target.value)} />
-          </div>
-        ) : null}
-        {form.claimStatus === 'Rejected' && (
-          <div className="form-group" style={{ gridColumn: '1/-1' }}>
-            <label className="form-label">Rejection Reason <span className="required">*</span></label>
-            <textarea className="form-textarea" rows={2} value={form.claimRejectedReason} onChange={e => set('claimRejectedReason', e.target.value)} style={{ resize: 'vertical' }} />
-          </div>
-        )}
-        <div className="form-group">
-          <label className="form-label">
-            Expected Settlement Date
-            {form.typeOfClaim?.includes('Cashless') && <span style={{ color: '#0284c7', fontSize: 11, marginLeft: 6 }}>(24–48h TAT)</span>}
-            {form.typeOfClaim?.includes('Reimbursement') && <span style={{ color: '#7c3aed', fontSize: 11, marginLeft: 6 }}>(15 Din TAT)</span>}
-          </label>
-          <input
-            type="date"
-            className="form-input"
-            value={toInputDate(form.expectedSettlementDate) || form.expectedSettlementDate || ''}
-            onChange={e => set('expectedSettlementDate', e.target.value)}
-          />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Actual Settlement Date</label>
-          <input
-            type="date"
-            className="form-input"
-            value={toInputDate(form.claimSettlementDate) || form.claimSettlementDate || ''}
-            onChange={e => set('claimSettlementDate', e.target.value)}
-          />
-        </div>
-        <div className="form-group" style={{ gridColumn: '1/-1' }}>
-          <label className="form-label">Remarks</label>
-          <textarea className="form-textarea" rows={2} value={form.remarks} onChange={e => set('remarks', e.target.value)} style={{ resize: 'vertical' }} />
         </div>
       </div>
 
@@ -374,6 +304,11 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
         </div>
       </div>
 
+      <div className="form-group" style={{ marginTop: 14 }}>
+        <label className="form-label">Remarks</label>
+        <textarea className="form-textarea" rows={2} value={form.remarks} onChange={e => set('remarks', e.target.value)} placeholder="Any additional notes or remarks..." style={{ resize: 'vertical' }} />
+      </div>
+
       <div className="modal-footer" style={{ padding: '20px 0 0' }}>
         <button type="button" className="btn btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
         <button type="submit" className="btn btn-primary" disabled={saving}>
@@ -385,10 +320,34 @@ const ClaimForm = ({ claim, claims, repairs, onClose, onSaved, preselectedRepair
 };
 
 // ─── ACTION PROCESS FORM MODAL (For 3-Stage Workflow) ───────────────────────────
-const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
+const ClaimProcessForm = ({ claim, targetStage, repairs = [], cars = [], onClose, onSaved }) => {
+  const matchedRepair = repairs?.find(r => r.repairNo === claim.repairNo);
+  const matchedCar = cars?.find(c => 
+    (claim.vehicleId && c.vehicleId === claim.vehicleId) || 
+    (matchedRepair?.vehicleId && c.vehicleId === matchedRepair.vehicleId) || 
+    (claim.vehicleName && c.carName && c.carName.toLowerCase() === claim.vehicleName.toLowerCase())
+  );
+  const displayReason = claim.reasonForRepair || claim.accidentReason || matchedRepair?.reasonForRepair || '';
+  const displayDept = claim.department || matchedRepair?.department || '';
+  const baseAccDate = claim.dateOfAccident || matchedRepair?.dateOfAccident || today();
   const initialType = claim.typeOfClaim || 'Own Damage';
-  const initialMode = claim.claimMode || 'Cashless Claim (Network Garage)';
-  const defaultExpDate = claim.expectedSettlementDate || calculateExpectedSettlementDate(claim.claimIntimatedDate || claim.dateOfAccident || today(), initialMode);
+  const initialMode = (claim.claimMode && (claim.claimMode.includes('Cashless') || claim.claimMode.includes('Reimbursement')))
+    ? claim.claimMode
+    : 'Cashless Claim (Network Garage)';
+  const resolvedRegNo = claim.registrationNo || matchedRepair?.registrationNo || matchedCar?.registrationNo || '';
+  const resolvedDriverName = claim.driverName || matchedRepair?.whoTakingCar || matchedRepair?.driverName || '';
+  const resolvedDriverMobile = claim.driverMobileNo || matchedRepair?.driverMobileNo || '';
+  const resolvedTimeOfAccident = claim.timeOfAccident || matchedRepair?.timeOfAccident || '';
+  const resolvedAccidentLocation = claim.accidentLocation || '';
+
+  const isExpValid = claim.expectedSettlementDate && /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(claim.expectedSettlementDate);
+  const isExpSameAsAccident = isExpValid && (
+    formatDate(claim.expectedSettlementDate) === formatDate(baseAccDate) ||
+    toInputDate(claim.expectedSettlementDate) === toInputDate(baseAccDate)
+  );
+  const defaultExpDate = (isExpValid && !isExpSameAsAccident)
+    ? claim.expectedSettlementDate
+    : calculateExpectedSettlementDate(baseAccDate, initialMode);
 
   const effectiveStage = targetStage || (
     !isStage1Completed(claim) ? 'incident' :
@@ -398,12 +357,15 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
 
   const [form, setForm] = useState({
     // Incident Details
-    dateOfAccident: claim.dateOfAccident || today(),
-    timeOfAccident: claim.timeOfAccident || '',
-    accidentLocation: claim.accidentLocation || '',
-    accidentReason: claim.accidentReason || '',
-    driverName: claim.driverName || '',
-    driverMobileNo: claim.driverMobileNo || '',
+    registrationNo: resolvedRegNo,
+    dateOfAccident: claim.dateOfAccident || matchedRepair?.dateOfAccident || today(),
+    timeOfAccident: resolvedTimeOfAccident,
+    accidentLocation: resolvedAccidentLocation,
+    accidentReason: claim.accidentReason || displayReason,
+    reasonForRepair: claim.reasonForRepair || displayReason,
+    department: claim.department || displayDept,
+    driverName: resolvedDriverName,
+    driverMobileNo: resolvedDriverMobile,
     // Policy & Insurance
     insuranceCompany: claim.insuranceCompany || '',
     policyNo: claim.policyNo || '',
@@ -425,24 +387,57 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
     claimStatus: claim.claimStatus && claim.claimStatus !== 'Settled' ? claim.claimStatus : (effectiveStage === 'settlement' ? 'Settled' : 'Claim Under Process'),
     claimApprovedAmount: claim.claimApprovedAmount || claim.estimatedClaimAmount || '',
     claimRejectedReason: claim.claimRejectedReason || '',
-    claimSettlementDate: claim.claimSettlementDate || today(),
+    claimSettlementDate: claim.claimSettlementDate || (effectiveStage === 'settlement' ? today() : ''),
     settlementPaymentMode: claim.settlementPaymentMode || 'Direct to Network Garage (Cashless)',
     settlementRefNo: claim.settlementRefNo || '',
+    surveyRemarks: claim.surveyRemarks || claim.surveyAssessmentRemarks || claim.remarks || '',
+    settlementRemarks: claim.settlementRemarks || '',
     remarks: claim.remarks || '',
     // Documents
     accidentPhotos: claim.accidentPhotos || null,
     firCopy: claim.firCopy || null,
     policeReport: claim.policeReport || null,
     otherDocuments: claim.otherDocuments || null,
+    paymentReceipt: claim.paymentReceipt || null,
   });
 
   const [saving, setSaving] = useState(false);
   const set = (field, val) => setForm(f => ({ ...f, [field]: val }));
 
+  useEffect(() => {
+    const fetchInsuranceDetails = async () => {
+      if (!form.insuranceCompany) {
+        try {
+          const insList = await getInsurance();
+          const vehId = claim.vehicleId;
+          const matched = insList.find(i => 
+            (vehId && i.vehicleId === vehId) || 
+            (claim.vehicleName && i.carName && i.carName.toLowerCase() === claim.vehicleName.toLowerCase())
+          );
+          if (matched) {
+            setForm(f => ({
+              ...f,
+              insuranceCompany: f.insuranceCompany || matched.nameOfCompany || matched.insuranceCompany || '',
+              policyNo: f.policyNo || matched.tpPolicyNo || matched.policyNo || '',
+              policyValidity: f.policyValidity || matched.odEndDate || matched.tpEndDate || ''
+            }));
+          }
+        } catch (e) {
+          console.warn('Could not auto-fetch insurance in ClaimProcessForm:', e);
+        }
+      }
+    };
+    fetchInsuranceDetails();
+  }, [claim.vehicleId, claim.vehicleName]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.insuranceCompany) {
+    if (!form.insuranceCompany || !form.insuranceCompany.trim()) {
       toast.error('Insurance Company is required');
+      return;
+    }
+    if (effectiveStage === 'incident' && (!form.estimatedClaimAmount || String(form.estimatedClaimAmount).trim() === '')) {
+      toast.error('Est. Amount is required');
       return;
     }
     if (effectiveStage === 'settlement' && form.claimStatus === 'Rejected' && !form.claimRejectedReason?.trim()) {
@@ -457,6 +452,7 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
         { key: 'policeReport', name: `${claim.claimNo}_PoliceReport` },
         { key: 'firCopy', name: `${claim.claimNo}_FIRCopy` },
         { key: 'otherDocuments', name: `${claim.claimNo}_OtherDoc` },
+        { key: 'paymentReceipt', name: `${claim.claimNo}_PaymentReceipt` },
       ];
 
       for (const df of docFields) {
@@ -474,8 +470,15 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
       if (effectiveStage === 'incident') {
         processedForm.stage1Completed = true;
         processedForm.stage1CompletedAt = today();
+        processedForm.stage2Completed = false;
+        processedForm.stage3Completed = false;
+        processedForm.claimSettlementDate = '';
+        processedForm.surveyStatus = processedForm.surveyStatus || 'Pending';
+        processedForm.expectedSettlementDate = form.expectedSettlementDate || calculateExpectedSettlementDate(form.dateOfAccident || today(), form.claimMode);
+        processedForm.reasonForRepair = form.reasonForRepair || displayReason;
+        processedForm.department = form.department || displayDept;
         if (!processedForm.claimStatus || processedForm.claimStatus === 'Claim Not Intimated') {
-          processedForm.claimStatus = 'Claim Intimated';
+          processedForm.claimStatus = 'Claim Under Process';
         }
       } else if (effectiveStage === 'process') {
         processedForm.stage1Completed = true;
@@ -491,6 +494,11 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
         processedForm.stage3Completed = true;
         processedForm.stage3CompletedAt = today();
         processedForm.claimSettlementDate = form.claimSettlementDate || today();
+        processedForm.claimApprovedAmount = form.claimApprovedAmount || form.estimatedClaimAmount || '';
+        processedForm.settlementPaymentMode = form.settlementPaymentMode || 'Direct to Network Garage (Cashless)';
+        processedForm.settlementRefNo = form.settlementRefNo || '';
+        processedForm.settlementRemarks = form.settlementRemarks || '';
+        processedForm.claimFinalStatus = form.claimStatus || 'Settled (Approved & Paid)';
         if (!processedForm.claimStatus || processedForm.claimStatus !== 'Rejected') {
           processedForm.claimStatus = 'Settled';
         }
@@ -516,7 +524,7 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
 
   return (
     <form onSubmit={handleSubmit} style={{ position: 'relative' }}>
-      <LoadingOverlay isVisible={saving} message="Updating Claim Workflow to Google Sheets..." />
+      <LoadingOverlay isVisible={saving} />
 
       {/* Workflow Stepper in Modal */}
       <div style={{
@@ -569,8 +577,11 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
           <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', marginTop: 2 }}>
             <span style={{ color: '#ea580c', fontFamily: 'monospace' }}>{claim.claimNo}</span> — {claim.vehicleName}
           </div>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-            Repair No: <strong style={{ color: '#059669', fontFamily: 'monospace' }}>{claim.repairNo}</strong> | Vehicle ID: <strong>{claim.vehicleId || '—'}</strong> | Date: <strong>{formatDate(claim.dateOfAccident)}</strong>
+          <div style={{ fontSize: 12, color: '#64748b', marginTop: 3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <span>Repair No: <strong style={{ color: '#059669', fontFamily: 'monospace' }}>{claim.repairNo}</strong></span>
+            <span>Vehicle ID: <strong>{claim.vehicleId || matchedRepair?.vehicleId || '—'}</strong></span>
+            {displayDept && <span>Department: <strong style={{ color: '#0f172a' }}>{displayDept}</strong></span>}
+            {displayReason && <span>Reason For Repair: <strong style={{ color: '#334155' }}>{displayReason}</strong></span>}
           </div>
         </div>
       </div>
@@ -583,9 +594,28 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
             <div className="form-section-title">1. Incident Information</div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
+            <div className="form-group" style={{ gridColumn: '1/-1' }}>
+              <label className="form-label">Registration No.</label>
+              <input
+                className="form-input"
+                value={form.registrationNo || resolvedRegNo || '—'}
+                readOnly
+                style={{ background: '#f8fafc', fontWeight: 800, color: '#059669', letterSpacing: 0.5 }}
+              />
+            </div>
             <div className="form-group">
               <label className="form-label">Date of Accident <span className="required">*</span></label>
-              <input type="date" className="form-input" value={toInputDate(form.dateOfAccident) || form.dateOfAccident} onChange={e => set('dateOfAccident', e.target.value)} required />
+              <input
+                type="date"
+                className="form-input"
+                value={toInputDate(form.dateOfAccident) || form.dateOfAccident}
+                onChange={e => {
+                  const d = e.target.value;
+                  const exp = calculateExpectedSettlementDate(d, form.claimMode || 'Cashless Claim (Network Garage)');
+                  setForm(f => ({ ...f, dateOfAccident: d, expectedSettlementDate: exp }));
+                }}
+                required
+              />
             </div>
             <div className="form-group">
               <label className="form-label">Time of Accident</label>
@@ -605,54 +635,172 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
             </div>
           </div>
 
-          <div className="form-section-header">
-            <div className="form-section-icon"><Shield size={17} strokeWidth={2.2} /></div>
-            <div className="form-section-title">2. Insurance & Policy Coverage</div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
-            <div className="form-group">
-              <label className="form-label">Insurance Company <span className="required">*</span></label>
-              <input className="form-input" value={form.insuranceCompany} onChange={e => set('insuranceCompany', e.target.value)} placeholder="e.g. HDFC ERGO, ICICI Lombard..." required />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Policy No.</label>
-              <input className="form-input" value={form.policyNo} onChange={e => set('policyNo', e.target.value)} placeholder="Enter policy number" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Policy Validity</label>
-              <input type="date" className="form-input" value={toInputDate(form.policyValidity) || form.policyValidity} onChange={e => set('policyValidity', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Estimated Claim Amount (₹)</label>
-              <input type="number" className="form-input" value={form.estimatedClaimAmount} onChange={e => set('estimatedClaimAmount', e.target.value)} placeholder="₹ Amount" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Type Of Claim</label>
-              <select className="form-select" value={form.typeOfClaim} onChange={e => set('typeOfClaim', e.target.value)}>
-                {CLAIM_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Claim Settlement Mode</label>
-              <select
-                className="form-select"
-                value={form.claimMode}
-                onChange={e => {
-                  const val = e.target.value;
-                  const baseD = form.dateOfAccident || today();
-                  const expD = calculateExpectedSettlementDate(baseD, val);
-                  setForm(f => ({ ...f, claimMode: val, expectedSettlementDate: expD || f.expectedSettlementDate }));
+          {/* 2. Insurance Claim Details Card (from user design) */}
+          <div
+            style={{
+              background: '#f8fafc',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: 12,
+              padding: '16px 18px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+              marginBottom: 16
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 10, borderBottom: '1px solid #e2e8f0' }}>
+              <div
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  background: '#ecfdf5',
+                  color: '#059669',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
                 }}
               >
-                {CLAIM_MODES.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
+                <Shield size={16} strokeWidth={2.2} />
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                Insurance Claim Details
+              </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">FIR Required?</label>
-              <select className="form-select" value={form.firRequired} onChange={e => set('firRequired', e.target.value)}>
-                <option value="No">No</option>
-                <option value="Yes">Yes</option>
-              </select>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">
+                  Insurance Company <span className="required">*</span>
+                </label>
+                <input
+                  className="form-input"
+                  value={form.insuranceCompany || ''}
+                  onChange={e => set('insuranceCompany', e.target.value)}
+                  placeholder="Enter insurance company name"
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">
+                  Est. Amount <span className="required">*</span>
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={form.estimatedClaimAmount || ''}
+                    onChange={e => set('estimatedClaimAmount', e.target.value)}
+                    placeholder="Enter amount"
+                    style={{ paddingLeft: 28 }}
+                    required
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: 11,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: '#64748b',
+                      fontWeight: 600,
+                      fontSize: 14,
+                      pointerEvents: 'none'
+                    }}
+                  >
+                    ₹
+                  </span>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Type Of Claim</label>
+                <select
+                  className="form-select"
+                  value={form.typeOfClaim || 'Own Damage'}
+                  onChange={e => set('typeOfClaim', e.target.value)}
+                >
+                  {CLAIM_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Claim Settlement Mode</label>
+                <select
+                  className="form-select"
+                  value={form.claimMode || 'Cashless Claim (Network Garage)'}
+                  onChange={e => {
+                    const val = e.target.value;
+                    const baseD = form.dateOfAccident || today();
+                    const expD = calculateExpectedSettlementDate(baseD, val);
+                    setForm(f => ({
+                      ...f,
+                      claimMode: val,
+                      expectedSettlementDate: expD
+                    }));
+                  }}
+                >
+                  {CLAIM_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                {form.claimMode?.includes('Cashless') && (
+                  <div style={{ marginTop: 5, fontSize: 11.5, color: '#0284c7', background: '#f0f9ff', padding: '4px 8px', borderRadius: 6, border: '1px solid #bae6fd', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>⚡ <strong>TAT: 24–48 Ghante (2 Din)</strong></span>
+                  </div>
+                )}
+                {form.claimMode?.includes('Reimbursement') && (
+                  <div style={{ marginTop: 5, fontSize: 11.5, color: '#7c3aed', background: '#f5f3ff', padding: '4px 8px', borderRadius: 6, border: '1px solid #ddd6fe', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>💰 <strong>TAT: 7–15 Din</strong></span>
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Expected Settlement</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={toInputDate(form.expectedSettlementDate) || form.expectedSettlementDate || ''}
+                  onChange={e => set('expectedSettlementDate', e.target.value)}
+                />
+                {form.expectedSettlementDate && (
+                  <div style={{ marginTop: 4, fontSize: 11.5, color: '#059669', fontWeight: 600 }}>
+                    Settlement Date: {formatDate(form.expectedSettlementDate)}
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Policy No.</label>
+                <input
+                  className="form-input"
+                  value={form.policyNo || ''}
+                  onChange={e => set('policyNo', e.target.value)}
+                  placeholder="Enter policy number"
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Policy Validity</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={toInputDate(form.policyValidity) || form.policyValidity || ''}
+                  onChange={e => set('policyValidity', e.target.value)}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">FIR Required?</label>
+                <select
+                  className="form-select"
+                  value={form.firRequired || 'No'}
+                  onChange={e => set('firRequired', e.target.value)}
+                >
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -734,7 +882,7 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
             </div>
             <div className="form-group" style={{ gridColumn: '1/-1' }}>
               <label className="form-label">Survey Assessment & Inspection Remarks</label>
-              <textarea className="form-textarea" rows={2} value={form.remarks} onChange={e => set('remarks', e.target.value)} placeholder="Surveyor notes, parts verified, approval updates..." style={{ resize: 'vertical' }} />
+              <textarea className="form-textarea" rows={2} value={form.surveyRemarks} onChange={e => { set('surveyRemarks', e.target.value); set('remarks', e.target.value); }} placeholder="Surveyor notes, parts verified, approval updates..." style={{ resize: 'vertical' }} />
             </div>
           </div>
 
@@ -817,8 +965,18 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
               <input className="form-input" value={form.settlementRefNo} onChange={e => set('settlementRefNo', e.target.value)} placeholder="Transaction / UTR / Cheque No." />
             </div>
             <div className="form-group" style={{ gridColumn: '1/-1' }}>
+              <label className="form-label">Payment File / Receipt Upload</label>
+              <FileUpload
+                value={form.paymentReceipt}
+                onChange={v => set('paymentReceipt', v)}
+                accept="image/*,.pdf"
+                label="Upload Payment Receipt / Cheque Copy / UTR Screenshot"
+                id="action-payment-receipt"
+              />
+            </div>
+            <div className="form-group" style={{ gridColumn: '1/-1' }}>
               <label className="form-label">Settlement Closure Remarks</label>
-              <textarea className="form-textarea" rows={2} value={form.remarks} onChange={e => set('remarks', e.target.value)} placeholder="Final settlement closure notes..." style={{ resize: 'vertical' }} />
+              <textarea className="form-textarea" rows={2} value={form.settlementRemarks} onChange={e => set('settlementRemarks', e.target.value)} placeholder="Final settlement closure notes..." style={{ resize: 'vertical' }} />
             </div>
           </div>
         </>
@@ -839,12 +997,8 @@ const ClaimProcessForm = ({ claim, targetStage, onClose, onSaved }) => {
         >
           {saving ? (
             <><span className="spinner" style={{ width: 14, height: 14 }} /> Submitting...</>
-          ) : effectiveStage === 'incident' ? (
-            '✓ Submit Claim of Accident → Move to Process of Claim'
-          ) : effectiveStage === 'process' ? (
-            '✓ Submit Process of Claim → Move to Claim Settlement'
           ) : (
-            '✓ Finalize & Settle Claim'
+            'Submit'
           )}
         </button>
       </div>
@@ -893,6 +1047,7 @@ const AccidentClaims = ({ defaultStage }) => {
   const navigate = useNavigate();
   const [claims, setClaims] = useState([]);
   const [repairs, setRepairs] = useState([]);
+  const [cars, setCars] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const getStageFromUrl = useCallback(() => {
@@ -918,17 +1073,20 @@ const AccidentClaims = ({ defaultStage }) => {
   const [deleteDialog, setDeleteDialog] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const [c, r] = await Promise.all([getClaims(), getRepairs()]);
-    setClaims(c); setRepairs(r);
-    setLoading(false);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    const [c, r, cr] = await Promise.all([getClaims(), getRepairs(), getCars()]);
+    setClaims(c || []);
+    setRepairs(r || []);
+    setCars(cr || []);
+    if (!silent) setLoading(false);
   }, []);
 
   useEffect(() => {
     load();
+    syncAllFromSheets(true).catch(() => {});
     const unsub = onStoreUpdate(() => {
-      load();
+      load(true);
     });
     return unsub;
   }, [load]);
@@ -1006,9 +1164,12 @@ const AccidentClaims = ({ defaultStage }) => {
   const filterList = useCallback((list) => {
     return list.filter(c => {
       const q = search.toLowerCase();
-      const vehId = (c.vehicleId || repairs.find(r => r.repairNo === c.repairNo)?.vehicleId || '').toLowerCase();
-      const ins = (c.insuranceCompany || repairs.find(r => r.repairNo === c.repairNo)?.insuranceCompany || '').toLowerCase();
-      const match = !q || c.claimNo?.toLowerCase().includes(q) || c.repairNo?.toLowerCase().includes(q) || c.vehicleName?.toLowerCase().includes(q) || vehId.includes(q) || ins.includes(q);
+      const matchedRepair = repairs.find(r => r.repairNo === c.repairNo);
+      const vehId = (c.vehicleId || matchedRepair?.vehicleId || '').toLowerCase();
+      const ins = (c.insuranceCompany || matchedRepair?.insuranceCompany || '').toLowerCase();
+      const reason = (c.reasonForRepair || c.accidentReason || matchedRepair?.reasonForRepair || '').toLowerCase();
+      const dept = (c.department || matchedRepair?.department || '').toLowerCase();
+      const match = !q || c.claimNo?.toLowerCase().includes(q) || c.repairNo?.toLowerCase().includes(q) || c.vehicleName?.toLowerCase().includes(q) || vehId.includes(q) || ins.includes(q) || reason.includes(q) || dept.includes(q);
       const st = !statusFilter || c.claimStatus === statusFilter;
       return match && st;
     });
@@ -1058,26 +1219,50 @@ const AccidentClaims = ({ defaultStage }) => {
           <th>Repair No.</th>
           <th>Vehicle ID</th>
           <th>Vehicle</th>
-          <th>Date of Accident</th>
-          <th>Insurance Co.</th>
+          <th>Reason For Repair</th>
+          <th>Department</th>
+          {activeStage !== 'incident' && <th>Date of Accident</th>}
+          {activeStage !== 'incident' && <th>Insurance Co.</th>}
           {activeStage === 'all' && <th>Current Stage</th>}
           {activeStage === 'process' && <th>Policy No.</th>}
-          <th>Est. Amount</th>
+          {activeStage !== 'incident' && <th>Est. Amount</th>}
           {activeStage === 'process' && <th>Surveyor Details</th>}
           {activeStage === 'process' && <th>Survey Status</th>}
-          <th>Claim Mode</th>
-          <th>Expected Settlement</th>
+          {activeStage === 'settlement' && (
+            <>
+              <th>Claim Intimated Date</th>
+              <th>Claim Intimation No. / Ticket</th>
+              <th>Surveyor Name</th>
+              <th>Surveyor Mobile No.</th>
+              <th>Survey Date</th>
+              <th>Survey Status</th>
+              <th>Claim Current Status</th>
+              <th>Survey Assessment & Inspection Remarks</th>
+              <th style={{ textAlign: 'center' }}>Survey Report / Documents</th>
+            </>
+          )}
+          {activeStage !== 'incident' && <th>Claim Mode</th>}
+          {activeStage !== 'incident' && <th>Expected Settlement</th>}
+          {activeStage === 'incident' && <th>Status</th>}
           <th style={{ textAlign: 'center' }}>Action</th>
         </tr>
       </thead>
       <tbody>
         {list.map(claim => {
-          const vehicleId = claim.vehicleId || repairs.find(r => r.repairNo === claim.repairNo)?.vehicleId || '';
-          const expDate = claim.expectedSettlementDate || calculateExpectedSettlementDate(claim.claimIntimatedDate || claim.dateOfAccident || claim.createdAt, claim.claimMode);
-          const isCashless = (claim.claimMode || '').includes('Cashless');
-          const isReimb = (claim.claimMode || '').includes('Reimbursement');
-          const estAmt = claim.estimatedClaimAmount || repairs.find(r => r.repairNo === claim.repairNo)?.estimatedClaimAmount || '';
-          const insCompany = claim.insuranceCompany || repairs.find(r => r.repairNo === claim.repairNo)?.insuranceCompany || '';
+          const matchedRepair = repairs.find(r => r.repairNo === claim.repairNo);
+          const vehicleId = claim.vehicleId || matchedRepair?.vehicleId || '';
+          const reasonForRepair = claim.reasonForRepair || claim.accidentReason || matchedRepair?.reasonForRepair || '—';
+          const department = claim.department || matchedRepair?.department || '—';
+          const safeMode = (claim.claimMode && (claim.claimMode.includes('Cashless') || claim.claimMode.includes('Reimbursement')))
+            ? claim.claimMode
+            : 'Cashless Claim (Network Garage)';
+          const expDate = (claim.expectedSettlementDate && /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(claim.expectedSettlementDate))
+            ? claim.expectedSettlementDate
+            : calculateExpectedSettlementDate(claim.claimIntimatedDate || claim.dateOfAccident || claim.createdAt, safeMode);
+          const isCashless = safeMode.includes('Cashless');
+          const isReimb = safeMode.includes('Reimbursement');
+          const estAmt = claim.estimatedClaimAmount || matchedRepair?.estimatedClaimAmount || '';
+          const insCompany = claim.insuranceCompany || matchedRepair?.insuranceCompany || '';
           const currStage = getClaimCurrentStage(claim);
 
           return (
@@ -1090,8 +1275,20 @@ const AccidentClaims = ({ defaultStage }) => {
                 </span>
               </td>
               <td><div style={{ fontWeight: 700, color: '#0f172a' }}>{claim.vehicleName}</div></td>
-              <td>{formatDate(claim.dateOfAccident)}</td>
-              <td>{insCompany || '—'}</td>
+              <td style={{ maxWidth: 220, whiteSpace: 'normal', wordBreak: 'break-word', fontSize: 12.5, color: '#334155' }}>
+                {reasonForRepair}
+              </td>
+              <td>
+                <span style={{
+                  background: '#f8fafc', border: '1px solid #e2e8f0', color: '#475569',
+                  padding: '2px 8px', borderRadius: 6, fontSize: 11.5, fontWeight: 700
+                }}>
+                  {department}
+                </span>
+              </td>
+
+              {activeStage !== 'incident' && <td>{formatDate(claim.dateOfAccident)}</td>}
+              {activeStage !== 'incident' && <td>{insCompany || '—'}</td>}
 
               {activeStage === 'all' && (
                 <td>
@@ -1110,15 +1307,17 @@ const AccidentClaims = ({ defaultStage }) => {
                 <td><span style={{ fontFamily: 'monospace', fontSize: 12 }}>{claim.policyNo || '—'}</span></td>
               )}
 
-              <td>
-                {estAmt ? (
-                  <span style={{ fontWeight: 700, color: '#0f172a' }}>
-                    ₹{Number(estAmt).toLocaleString('en-IN')}
-                  </span>
-                ) : (
-                  <span style={{ color: '#94a3b8' }}>—</span>
-                )}
-              </td>
+              {activeStage !== 'incident' && (
+                <td>
+                  {estAmt ? (
+                    <span style={{ fontWeight: 700, color: '#0f172a' }}>
+                      ₹{Number(estAmt).toLocaleString('en-IN')}
+                    </span>
+                  ) : (
+                    <span style={{ color: '#94a3b8' }}>—</span>
+                  )}
+                </td>
+              )}
 
               {activeStage === 'process' && (
                 <td>
@@ -1139,26 +1338,101 @@ const AccidentClaims = ({ defaultStage }) => {
                 </td>
               )}
 
-              <td>
-                {isCashless ? (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11.5 }}>
-                    ⚡ Cashless (Network)
+              {activeStage === 'settlement' && (
+                <>
+                  <td><span style={{ fontSize: 12.5 }}>{formatDate(claim.claimIntimatedDate) || '—'}</span></td>
+                  <td>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#334155', fontSize: 12 }}>
+                      {claim.claimIntimationNo || '—'}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 12.5 }}>
+                      {claim.surveyorName || '—'}
+                    </div>
+                  </td>
+                  <td>
+                    <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#475569' }}>
+                      {claim.surveyorMobileNo || '—'}
+                    </span>
+                  </td>
+                  <td><span style={{ fontSize: 12.5 }}>{formatDate(claim.surveyDate) || '—'}</span></td>
+                  <td>
+                    <Badge
+                      label={claim.surveyStatus || 'Pending'}
+                      variant={claim.surveyStatus === 'Completed' ? 'success' : claim.surveyStatus === 'Scheduled' ? 'info' : 'warning'}
+                    />
+                  </td>
+                  <td>
+                    <span style={{
+                      fontSize: 11.5, fontWeight: 700, padding: '3px 8px', borderRadius: 6,
+                      background: '#f0f9ff', color: '#0284c7', border: '1px solid #bae6fd'
+                    }}>
+                      {claim.claimStatus || 'Claim Under Process'}
+                    </span>
+                  </td>
+                  <td style={{ maxWidth: 220, whiteSpace: 'normal', wordBreak: 'break-word', fontSize: 12, color: '#334155' }}>
+                    {claim.remarks || '—'}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    {(() => {
+                      const doc = claim.otherDocuments;
+                      const url = typeof doc === 'object' ? doc?.url : doc;
+                      return url ? (
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline"
+                          onClick={(e) => { e.stopPropagation(); openDocument(url); }}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 11.5, fontWeight: 600 }}
+                        >
+                          <FileText size={12} /> View Doc
+                        </button>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
+                      );
+                    })()}
+                  </td>
+                </>
+              )}
+
+              {activeStage !== 'incident' && (
+                <td>
+                  {isCashless ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11.5 }}>
+                      ⚡ Cashless (Network)
+                    </span>
+                  ) : isReimb ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#ede9fe', color: '#6d28d9', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11.5 }}>
+                      💰 Reimbursement
+                    </span>
+                  ) : (
+                    <span style={{ color: '#64748b', fontSize: 12 }}>—</span>
+                  )}
+                </td>
+              )}
+
+              {activeStage !== 'incident' && (
+                <td>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#0f172a' }}>{formatDate(expDate)}</div>
+                    {isCashless && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#0284c7' }}>Within 24–48h</span>}
+                    {isReimb && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#7c3aed' }}>Within 7–15 Days</span>}
+                  </div>
+                </td>
+              )}
+
+              {activeStage === 'incident' && (
+                <td>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa',
+                    padding: '3px 9px', borderRadius: 6, fontSize: 12, fontWeight: 700
+                  }}>
+                    <Clock size={12} /> Pending Submission
                   </span>
-                ) : isReimb ? (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#ede9fe', color: '#6d28d9', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11.5 }}>
-                    💰 Reimbursement
-                  </span>
-                ) : (
-                  <span style={{ color: '#64748b', fontSize: 12 }}>—</span>
-                )}
-              </td>
-              <td>
-                <div>
-                  <div style={{ fontWeight: 700, color: '#0f172a' }}>{formatDate(expDate)}</div>
-                  {isCashless && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#0284c7' }}>Within 24–48h</span>}
-                  {isReimb && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#7c3aed' }}>Within 7–15 Days</span>}
-                </div>
-              </td>
+                </td>
+              )}
+
               <td style={{ textAlign: 'center' }}>
                 {canEdit ? (
                   <button
@@ -1216,6 +1490,8 @@ const AccidentClaims = ({ defaultStage }) => {
           <th>Repair No.</th>
           <th>Vehicle ID</th>
           <th>Vehicle</th>
+          <th>Reason For Repair</th>
+          <th>Department</th>
           <th>Date of Accident</th>
           <th>Insurance Co.</th>
           {activeStage === 'process' && <th>Policy No.</th>}
@@ -1225,24 +1501,34 @@ const AccidentClaims = ({ defaultStage }) => {
           {(activeStage === 'settlement' || activeStage === 'all') && <th>Approved Amount</th>}
           {(activeStage === 'settlement' || activeStage === 'all') && <th>Settlement Date</th>}
           <th>Claim Mode</th>
+          <th>Expected Settlement</th>
           <th>Stage Status</th>
-          {(activeStage === 'settlement' || activeStage === 'all') && <th style={{ textAlign: 'center' }}>Documents</th>}
           <th style={{ textAlign: 'center' }}>Actions</th>
         </tr>
       </thead>
       <tbody>
         {list.map(claim => {
-          const vehicleId = claim.vehicleId || repairs.find(r => r.repairNo === claim.repairNo)?.vehicleId || '';
+          const matchedRepair = repairs.find(r => r.repairNo === claim.repairNo);
+          const vehicleId = claim.vehicleId || matchedRepair?.vehicleId || '';
+          const reasonForRepair = claim.reasonForRepair || claim.accidentReason || matchedRepair?.reasonForRepair || '—';
+          const department = claim.department || matchedRepair?.department || '—';
           const docList = [
             { label: 'Photos', url: claim.accidentPhotos },
             { label: 'Report', url: claim.policeReport },
             { label: 'FIR', url: claim.firCopy },
             { label: 'Other', url: claim.otherDocuments },
+            { label: 'Payment', url: claim.paymentReceipt },
           ].filter(d => !!d.url);
-          const isCashless = (claim.claimMode || '').includes('Cashless');
-          const isReimb = (claim.claimMode || '').includes('Reimbursement');
-          const estAmt = claim.estimatedClaimAmount || repairs.find(r => r.repairNo === claim.repairNo)?.estimatedClaimAmount || '';
-          const insCompany = claim.insuranceCompany || repairs.find(r => r.repairNo === claim.repairNo)?.insuranceCompany || '';
+          const safeMode = (claim.claimMode && (claim.claimMode.includes('Cashless') || claim.claimMode.includes('Reimbursement')))
+            ? claim.claimMode
+            : 'Cashless Claim (Network Garage)';
+          const isCashless = safeMode.includes('Cashless');
+          const isReimb = safeMode.includes('Reimbursement');
+          const estAmt = claim.estimatedClaimAmount || matchedRepair?.estimatedClaimAmount || '';
+          const insCompany = claim.insuranceCompany || matchedRepair?.insuranceCompany || '';
+          const expDate = (claim.expectedSettlementDate && /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(claim.expectedSettlementDate))
+            ? claim.expectedSettlementDate
+            : calculateExpectedSettlementDate(claim.dateOfAccident || claim.createdAt, safeMode);
 
           return (
             <tr key={claim.claimNo}>
@@ -1254,6 +1540,17 @@ const AccidentClaims = ({ defaultStage }) => {
                 </span>
               </td>
               <td><div style={{ fontWeight: 700, color: '#0f172a' }}>{claim.vehicleName}</div></td>
+              <td style={{ maxWidth: 200, whiteSpace: 'normal', wordBreak: 'break-word', fontSize: 12.5, color: '#334155' }}>
+                {reasonForRepair}
+              </td>
+              <td>
+                <span style={{
+                  background: '#f8fafc', border: '1px solid #e2e8f0', color: '#475569',
+                  padding: '2px 8px', borderRadius: 6, fontSize: 11.5, fontWeight: 700
+                }}>
+                  {department}
+                </span>
+              </td>
               <td>{formatDate(claim.dateOfAccident)}</td>
               <td>{insCompany || '—'}</td>
 
@@ -1310,6 +1607,14 @@ const AccidentClaims = ({ defaultStage }) => {
               </td>
 
               <td>
+                <div>
+                  <div style={{ fontWeight: 700, color: '#0f172a' }}>{formatDate(expDate)}</div>
+                  {isCashless && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#0284c7' }}>Within 24–48h</span>}
+                  {isReimb && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#7c3aed' }}>Within 7–15 Days</span>}
+                </div>
+              </td>
+
+              <td>
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   background: '#ecfdf5', color: '#047857', padding: '3px 8px',
@@ -1324,32 +1629,6 @@ const AccidentClaims = ({ defaultStage }) => {
                     : (claim.claimStatus === 'Rejected' ? '❌ Rejected' : '✓ Settled')}
                 </span>
               </td>
-
-              {(activeStage === 'settlement' || activeStage === 'all') && (
-                <td style={{ textAlign: 'center' }}>
-                  {docList.length > 0 ? (
-                    <div style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap', justifyContent: 'center' }}>
-                      {docList.map(doc => {
-                        const docUrl = typeof doc.url === 'object' ? doc.url?.url : doc.url;
-                        return (
-                          <button
-                            key={doc.label}
-                            type="button"
-                            onClick={() => openDocument(docUrl, `${claim.claimNo}_${doc.label}`)}
-                            className="btn btn-outline btn-xs"
-                            style={{ padding: '2px 7px', fontSize: 11, fontWeight: 700, borderRadius: 6 }}
-                            title={`Open ${doc.label}`}
-                          >
-                            📁 {doc.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
-                  )}
-                </td>
-              )}
 
               <td style={{ textAlign: 'center' }}>
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
@@ -1385,16 +1664,11 @@ const AccidentClaims = ({ defaultStage }) => {
           </div>
           <h1 className="page-title">
             {activeStage === 'incident' 
-              ? 'Claim of accident' 
+              ? 'Claim of Accident' 
               : activeStage === 'process' 
-              ? 'Process of claim' 
-              : 'Claim settlement'}
+              ? 'Process of Claim' 
+              : 'Claim Settlement'}
           </h1>
-          <p className="page-subtitle">
-            {activeStage === 'incident' && `${stagePendingClaims.length} accident claims awaiting incident submission, ${stageCompletedClaims.length} completed`}
-            {activeStage === 'process' && `${stagePendingClaims.length} claims awaiting survey & processing, ${stageCompletedClaims.length} completed`}
-            {activeStage === 'settlement' && `${stagePendingClaims.length} claims awaiting settlement approval, ${stageCompletedClaims.length} finalized & settled`}
-          </p>
         </div>
         {canEdit && activeStage === 'incident' && (
           <button className="btn btn-primary" onClick={() => { setSelected(null); setPreselectedRepairNo(null); setModal('add'); }}>
@@ -1564,11 +1838,20 @@ const AccidentClaims = ({ defaultStage }) => {
           <ClaimProcessForm
             claim={selected}
             targetStage={modalStage}
+            repairs={repairs}
+            cars={cars}
             onClose={() => { setModal(null); setSelected(null); }}
             onSaved={(stg) => {
               setModal(null);
               setSelected(null);
               load();
+              if (stg === 'incident') {
+                handleStageChange('process');
+              } else if (stg === 'process') {
+                handleStageChange('settlement');
+              } else {
+                setStatusTab('completed');
+              }
             }}
           />
         )}
@@ -1577,31 +1860,46 @@ const AccidentClaims = ({ defaultStage }) => {
       {/* View Modal */}
       <Modal isOpen={modal === 'view'} onClose={() => setModal(null)}
         title={`Claim Details — ${selected?.claimNo}`} icon={AlertTriangle} size="lg">
-        {selected && (
-          <div>
-            <ClaimStatusStepper status={selected.claimStatus} />
-            <div style={{ marginTop: 20 }}>
-              {/* 1. Incident & Vehicle Information */}
-              <div className="form-section-header" style={{ marginBottom: 12 }}>
-                <div className="form-section-icon"><AlertTriangle size={17} strokeWidth={2.2} /></div>
-                <div className="form-section-title">Incident & Vehicle Details</div>
-              </div>
-              <div className="detail-grid" style={{ marginBottom: 18 }}>
-                {[
-                  ['Claim No.', selected.claimNo],
-                  ['Repair No.', selected.repairNo],
-                  ['Vehicle ID', selected.vehicleId || repairs.find(r => r.repairNo === selected.repairNo)?.vehicleId],
-                  ['Vehicle', selected.vehicleName],
-                  ['Registration No.', selected.registrationNo],
-                  ['Date of Accident', formatDate(selected.dateOfAccident)],
-                  ['Time of Accident', selected.timeOfAccident],
-                  ['Accident Location', selected.accidentLocation],
-                  ['Driver Name', selected.driverName],
-                  ['Driver Mobile', selected.driverMobileNo],
-                ].map(([l, v]) => (
-                  <div key={l} className="detail-item"><label>{l}</label><div className="value">{v || '—'}</div></div>
-                ))}
-              </div>
+        {selected && (() => {
+          const matchedRepair = repairs.find(r => r.repairNo === selected.repairNo);
+          const matchedCar = cars.find(c => 
+            (selected.vehicleId && c.vehicleId === selected.vehicleId) || 
+            (matchedRepair?.vehicleId && c.vehicleId === matchedRepair.vehicleId) || 
+            (selected.vehicleName && c.carName && c.carName.toLowerCase() === selected.vehicleName.toLowerCase())
+          );
+          const regNo = selected.registrationNo || matchedRepair?.registrationNo || matchedCar?.registrationNo || '—';
+          const driver = selected.driverName || matchedRepair?.whoTakingCar || matchedRepair?.driverName || '—';
+          const mobile = selected.driverMobileNo || matchedRepair?.driverMobileNo || '—';
+          const time = selected.timeOfAccident || matchedRepair?.timeOfAccident || '—';
+          const loc = selected.accidentLocation || '—';
+
+          return (
+            <div>
+              <ClaimStatusStepper status={selected.claimStatus} />
+              <div style={{ marginTop: 20 }}>
+                {/* 1. Incident & Vehicle Information */}
+                <div className="form-section-header" style={{ marginBottom: 12 }}>
+                  <div className="form-section-icon"><AlertTriangle size={17} strokeWidth={2.2} /></div>
+                  <div className="form-section-title">Incident & Vehicle Details</div>
+                </div>
+                <div className="detail-grid" style={{ marginBottom: 18 }}>
+                  {[
+                    ['Claim No.', selected.claimNo],
+                    ['Repair No.', selected.repairNo],
+                    ['Vehicle ID', selected.vehicleId || matchedRepair?.vehicleId || matchedCar?.vehicleId || '—'],
+                    ['Vehicle', selected.vehicleName || matchedCar?.carName || '—'],
+                    ['Department', selected.department || matchedRepair?.department || '—'],
+                    ['Reason For Repair', selected.reasonForRepair || selected.accidentReason || matchedRepair?.reasonForRepair || '—'],
+                    ['Registration No.', regNo],
+                    ['Date of Accident', formatDate(selected.dateOfAccident)],
+                    ['Time of Accident', time],
+                    ['Accident Location', loc],
+                    ['Driver Name', driver],
+                    ['Driver Mobile', mobile],
+                  ].map(([l, v]) => (
+                    <div key={l} className="detail-item"><label>{l}</label><div className="value">{v || '—'}</div></div>
+                  ))}
+                </div>
 
               {/* 2. Insurance & Policy Coverage */}
               <div className="form-section-header" style={{ marginBottom: 12 }}>
@@ -1609,54 +1907,30 @@ const AccidentClaims = ({ defaultStage }) => {
                 <div className="form-section-title">Insurance & Policy Coverage</div>
               </div>
               <div className="detail-grid" style={{ marginBottom: 18 }}>
-                {[
-                  ['Insurance Company', selected.insuranceCompany || repairs.find(r => r.repairNo === selected.repairNo)?.insuranceCompany],
-                  ['Policy No.', selected.policyNo],
-                  ['Policy Validity', formatDate(selected.policyValidity)],
-                  ['Type Of Claim', selected.typeOfClaim || 'Own Damage'],
-                  ['Claim Settlement Mode', selected.claimMode],
-                  ['Estimated Claim Amount', selected.estimatedClaimAmount ? `₹${Number(selected.estimatedClaimAmount).toLocaleString('en-IN')}` : '—'],
-                  ['Expected Settlement Date', formatDate(selected.expectedSettlementDate || calculateExpectedSettlementDate(selected.claimIntimatedDate || selected.dateOfAccident, selected.claimMode))],
-                  ['FIR Required', selected.firRequired],
-                ].map(([l, v]) => (
-                  <div key={l} className="detail-item"><label>{l}</label><div className="value">{v || '—'}</div></div>
-                ))}
+                {(() => {
+                  const validMode = (selected.claimMode && (selected.claimMode.includes('Cashless') || selected.claimMode.includes('Reimbursement')))
+                    ? selected.claimMode
+                    : 'Cashless Claim (Network Garage)';
+                  const validExpDate = (selected.expectedSettlementDate && /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(selected.expectedSettlementDate))
+                    ? selected.expectedSettlementDate
+                    : calculateExpectedSettlementDate(selected.claimIntimatedDate || selected.dateOfAccident || today(), validMode);
+
+                  return [
+                    ['Insurance Company', selected.insuranceCompany || repairs.find(r => r.repairNo === selected.repairNo)?.insuranceCompany],
+                    ['Policy No.', selected.policyNo],
+                    ['Policy Validity', formatDate(selected.policyValidity)],
+                    ['Type Of Claim', selected.typeOfClaim || 'Own Damage'],
+                    ['Claim Settlement Mode', validMode],
+                    ['Estimated Claim Amount', selected.estimatedClaimAmount ? `₹${Number(selected.estimatedClaimAmount).toLocaleString('en-IN')}` : '—'],
+                    ['Expected Settlement Date', formatDate(validExpDate)],
+                    ['FIR Required', selected.firRequired],
+                  ].map(([l, v]) => (
+                    <div key={l} className="detail-item"><label>{l}</label><div className="value">{v || '—'}</div></div>
+                  ));
+                })()}
               </div>
 
-              {/* 3. Survey & Processing */}
-              <div className="form-section-header" style={{ marginBottom: 12 }}>
-                <div className="form-section-icon"><CheckCircle size={17} strokeWidth={2.2} /></div>
-                <div className="form-section-title">Survey & Processing</div>
-              </div>
-              <div className="detail-grid" style={{ marginBottom: 18 }}>
-                {[
-                  ['Claim Intimated Date', formatDate(selected.claimIntimatedDate)],
-                  ['Claim Intimation No.', selected.claimIntimationNo],
-                  ['Surveyor Name', selected.surveyorName],
-                  ['Surveyor Mobile', selected.surveyorMobileNo],
-                  ['Survey Date', formatDate(selected.surveyDate)],
-                  ['Survey Status', selected.surveyStatus],
-                  ['Claim Status', selected.claimStatus],
-                  ['Claim Approved Amount', selected.claimApprovedAmount ? `₹${Number(selected.claimApprovedAmount).toLocaleString('en-IN')}` : '—'],
-                  ['Actual Settlement Date', formatDate(selected.claimSettlementDate)],
-                ].map(([l, v]) => (
-                  <div key={l} className="detail-item"><label>{l}</label><div className="value">{v || '—'}</div></div>
-                ))}
-              </div>
-              {selected.claimStatus === 'Rejected' && selected.claimRejectedReason && (
-                <div className="detail-item" style={{ marginBottom: 16 }}>
-                  <label style={{ color: '#ef4444' }}>Rejection Reason</label>
-                  <div className="value" style={{ color: '#ef4444' }}>{selected.claimRejectedReason}</div>
-                </div>
-              )}
-              {selected.remarks && (
-                <div className="detail-item" style={{ marginBottom: 16 }}>
-                  <label>Remarks</label>
-                  <div className="value">{selected.remarks}</div>
-                </div>
-              )}
-
-              {/* 4. Process Claim: Documents & Evidence */}
+              {/* 3. Process Claim: Documents & Evidence */}
               <div style={{ marginTop: 22, borderTop: '1px solid #e2e8f0', paddingTop: 18 }}>
                 <div className="form-section-header" style={{ marginBottom: 14 }}>
                   <div className="form-section-icon"><FileText size={18} strokeWidth={2.2} /></div>
@@ -1668,6 +1942,7 @@ const AccidentClaims = ({ defaultStage }) => {
                     { label: 'Police Report', icon: '📑', key: 'policeReport', url: selected.policeReport },
                     { label: 'Other Documents', icon: '📁', key: 'otherDocuments', url: selected.otherDocuments },
                     { label: 'FIR Copy', icon: '📋', key: 'firCopy', url: selected.firCopy, condition: selected.firRequired === 'Yes' || selected.firCopy },
+                    { label: 'Payment Receipt / File', icon: '💳', key: 'paymentReceipt', url: selected.paymentReceipt, condition: !!selected.paymentReceipt },
                   ].filter(d => d.condition !== false).map(doc => {
                     const docUrl = typeof doc.url === 'object' ? doc.url?.url : doc.url;
                     const hasDoc = !!docUrl && String(docUrl).trim() !== '' && String(docUrl).trim() !== '—';
@@ -1727,10 +2002,23 @@ const AccidentClaims = ({ defaultStage }) => {
                     );
                   })}
                 </div>
+                {selected.claimStatus === 'Rejected' && selected.claimRejectedReason && (
+                  <div className="detail-item" style={{ marginTop: 16 }}>
+                    <label style={{ color: '#ef4444' }}>Rejection Reason</label>
+                    <div className="value" style={{ color: '#ef4444' }}>{selected.claimRejectedReason}</div>
+                  </div>
+                )}
+                {selected.remarks && (
+                  <div className="detail-item" style={{ marginTop: 16 }}>
+                    <label>Remarks</label>
+                    <div className="value">{selected.remarks}</div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
       </Modal>
 
       <ConfirmDialog isOpen={!!deleteDialog} onClose={() => setDeleteDialog(null)} onConfirm={handleDelete}

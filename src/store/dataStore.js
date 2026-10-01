@@ -2,7 +2,7 @@
 // Dual-layer data store: Synchronous local state + background sync to connected Google Sheets API.
 
 import { getScriptUrl, fetchFromSheet, sendToSheet } from '../api/googleSheetsClient';
-import { createTimestamp, today } from '../utils/dateUtils';
+import { createTimestamp, today, calculateExpectedSettlementDate } from '../utils/dateUtils';
 import { generateClaimNo, generateId } from '../utils/idGenerator';
 
 const KEYS = {
@@ -420,6 +420,7 @@ export const mapRepairToSheet = (repair) => ({
   "Reason For Repair": repair.reasonForRepair || '',
   "Which Garage Is It Going For Repair": repair.garage || '',
   "Who Is Taking The Car": repair.whoTakingCar || '',
+  "Repair Type": repair.repairType || (repair.insuranceToBeClaimed === 'Yes' ? 'Accident' : 'Normal Repair'),
   "Insurance to be claimed": repair.insuranceToBeClaimed || 'No',
   "Department": repair.department || '',
   ...(repair.plannedDate ? { "Planned 1": repair.plannedDate } : {}),
@@ -454,6 +455,7 @@ export const mapSheetRowToRepair = (row, index) => {
     garage: row['Which Garage Is It Going For Repair'] || row.garage || '',
     garageName: row['Garage Name'] || row.garageName || row['Which Garage Is It Going For Repair'] || row.garage || '',
     whoTakingCar: row['Who Is Taking The Car'] || row.whoTakingCar || '',
+    repairType: row['Repair Type'] || row.repairType || (row['Insurance to be claimed'] === 'Yes' ? 'Accident' : 'Normal Repair'),
     insuranceToBeClaimed: row['Insurance to be claimed'] || row.insuranceToBeClaimed || 'No',
     department: row['Department'] || row.department || '',
     plannedDate: row['Planned 1'] || row['Planned Date'] || row['Planned'] || row.plannedDate || '',
@@ -502,52 +504,132 @@ export const mapSheetRowToClaim = (row, index) => {
   const claimNo = get('Claim No.', 'Claim No', 'claimNo', 'CLAIM NO');
   const repairNo = get('Repair No.', 'Repair No', 'repairNo', 'REPAIR NO');
   const vehicleId = get('Vehicle ID', 'vehicleId', 'VEHICLE ID');
-  const vehicleName = get('Vehicle Name', 'Vehicle / Car Name', 'vehicleName', 'Car Name', 'carName');
+  const vehicleNameRaw = get('Vehicle', 'Vehicle Name', 'Vehicle / Car Name', 'vehicleName', 'Car Name', 'carName');
+  const isDateLike = (str) => /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(String(str || '').trim());
+  const vehicleName = isDateLike(vehicleNameRaw) ? '' : vehicleNameRaw;
+
+  const rawReason = get('Reason For Repair', 'reasonForRepair', 'Reason for Repair', 'Accident Reason', 'accidentReason');
+  const reasonForRepair = isDateLike(rawReason) ? '' : rawReason;
+
+  const department = get('Departmen', 'Department', 'department');
+
   if (!claimNo && !repairNo && !vehicleId && !vehicleName) return null;
+
+  const repairs = load(KEYS.REPAIRS);
+  const matchedRepair = repairNo ? repairs.find(r => r.repairNo === repairNo) : null;
+  const finalVehicleName = vehicleName || matchedRepair?.carName || '';
+  const finalReason = reasonForRepair || matchedRepair?.reasonForRepair || '';
+  const finalDept = department || matchedRepair?.department || '';
+  const finalVehicleId = vehicleId || matchedRepair?.vehicleId || '';
+
+  const cars = load(KEYS.CARS);
+  const matchedCar = (finalVehicleId || finalVehicleName)
+    ? cars.find(c => (finalVehicleId && c.vehicleId === finalVehicleId) || (finalVehicleName && c.carName && c.carName.toLowerCase() === finalVehicleName.toLowerCase()))
+    : null;
+
+  const finalRegNo = get('Registration No.', 'Registration No', 'registrationNo') || matchedRepair?.registrationNo || matchedCar?.registrationNo || '';
+  const finalDriverName = get('Driver Name', 'driverName') || matchedRepair?.whoTakingCar || matchedRepair?.driverName || '';
+  const finalDriverMobile = get('Driver Mobile', 'Driver Mobile No.', 'driverMobileNo') || matchedRepair?.driverMobileNo || '';
+  const finalTimeOfAccident = get('Time of Accident', 'Time Of Accident', 'timeOfAccident') || matchedRepair?.timeOfAccident || '';
+  const finalAccidentLoc = get('Accident Location', 'accidentLocation') || '';
 
   return {
     id: get('id') || `clm_${claimNo || index + 1}`,
     claimNo: claimNo || `CLM-${String(index + 1).padStart(4, '0')}`,
     repairNo: repairNo || '',
-    vehicleId: vehicleId || '',
-    vehicleName: vehicleName || '',
-    registrationNo: get('Registration No.', 'Registration No', 'registrationNo'),
-    dateOfAccident: get('Date of Accident', 'Date Of Accident', 'dateOfAccident'),
-    timeOfAccident: get('Time of Accident', 'Time Of Accident', 'timeOfAccident'),
-    accidentLocation: get('Accident Location', 'accidentLocation'),
-    accidentReason: get('Accident Reason', 'accidentReason'),
-    driverName: get('Driver Name', 'driverName'),
-    driverMobileNo: get('Driver Mobile No.', 'Driver Mobile', 'driverMobileNo'),
+    vehicleId: finalVehicleId,
+    vehicleName: finalVehicleName,
+    registrationNo: finalRegNo,
+    dateOfAccident: get('Date of Accident', 'Date Of Accident', 'dateOfAccident') || matchedRepair?.dateOfAccident || today(),
+    timeOfAccident: finalTimeOfAccident,
+    accidentLocation: finalAccidentLoc,
+    accidentReason: finalReason,
+    reasonForRepair: finalReason,
+    department: finalDept,
+    driverName: finalDriverName,
+    driverMobileNo: finalDriverMobile,
     insuranceCompany: get('Insurance Company', 'insuranceCompany'),
     policyNo: get('Policy No.', 'Policy No', 'policyNo'),
     policyValidity: get('Policy Validity', 'policyValidity'),
     insuranceClaim: get('Insurance Claim', 'insuranceClaim') || 'Yes',
     estimatedClaimAmount: get('Estimated Claim Amount (₹)', 'Estimated Claim Amount', 'Est. Amount', 'estimatedClaimAmount'),
     typeOfClaim: get('Type Of Claim', 'typeOfClaim') || 'Own Damage',
-    claimMode: get('Claim Mode', 'Claim Settlement Mode', 'Settlement Mode', 'claimMode') || 'Cashless Claim (Network Garage)',
+    claimMode: (() => {
+      const m = get('Claim Settlement Mode', 'Claim Mode', 'Settlement Mode', 'claimMode');
+      if (m && (m.includes('Cashless') || m.includes('Reimbursement'))) return m;
+      return 'Cashless Claim (Network Garage)';
+    })(),
     accidentPhotos: get('Accident Photos', 'Accident Photo', 'accidentPhotos', 'accidentPhoto', 'photos', 'photo'),
     firRequired: get('FIR Required?', 'FIR Required', 'firRequired') || 'No',
     firCopy: get('FIR Copy', 'FIR', 'firCopy'),
     policeReport: get('Police Report', 'policeReport', 'Police Report Copy', 'Report'),
-    otherDocuments: get('Other Documents', 'Other Document', 'otherDocuments', 'otherDocument', 'Documents', 'Document'),
-    claimIntimatedDate: get('Claim Intimated Date', 'Claim Intimated', 'claimIntimatedDate'),
-    claimIntimationNo: get('Claim Intimation No.', 'Claim Intimation No', 'Claim Intimation', 'claimIntimationNo'),
+    otherDocuments: get('Survey Report / Documents', 'Other Documents', 'Other Document', 'otherDocuments', 'otherDocument', 'Documents', 'Document'),
+    paymentReceipt: get('Payment File / Receipt Upload', 'Payment Receipt', 'Payment File', 'Payment Proof', 'Payment Document', 'Receipt', 'paymentReceipt'),
+    claimIntimatedDate: get('Claim Intimated Date ', 'Claim Intimated Date', 'Claim Intimated', 'claimIntimatedDate'),
+    claimIntimationNo: get('Claim Intimation No. / Ticket', 'Claim Intimation No.', 'Claim Intimation No', 'Claim Intimation', 'claimIntimationNo'),
     surveyorName: get('Surveyor Name', 'Surveyor', 'surveyorName'),
     surveyorMobileNo: get('Surveyor Mobile No.', 'Surveyor Mobile', 'surveyorMobileNo'),
     surveyDate: get('Survey Date', 'surveyDate'),
-    surveyStatus: get('Survey', 'Survey Status', 'surveyStatus') || 'Pending',
-    claimStatus: get('Claim Status', 'claimStatus') || 'Claim Under Process',
-    claimApprovedAmount: get('Claim Approved Amount (₹)', 'Claim Approved Amount', 'Approved Amount', 'claimApprovedAmount'),
+    surveyStatus: get('Survey Status', 'Survey', 'surveyStatus') || 'Pending',
+    claimStatus: get('Claim Current Status', 'Claim Status', 'claimStatus') || 'Claim Under Process',
+    claimApprovedAmount: get('Final Approved Claim Amount (₹)', 'Claim Approved Amount (₹)', 'Claim Approved Amount', 'claimApprovedAmount'),
     claimRejectedReason: get('Claim Rejected Reason', 'Rejection Reason', 'claimRejectedReason'),
-    expectedSettlementDate: get('Expected Settlement Date', 'Expected Settlement', 'expectedSettlementDate'),
-    claimSettlementDate: get('Settlement Date', 'Claim Settlement Date', 'claimSettlementDate'),
-    remarks: get('Remarks', 'remarks'),
+    expectedSettlementDate: (() => {
+      const exp = get('Expected Settlement Date', 'Expected Settlement', 'expectedSettlementDate');
+      if (exp && /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(exp)) return exp;
+      const m = get('Claim Settlement Mode', 'Claim Mode', 'Settlement Mode', 'claimMode');
+      const validM = (m && (m.includes('Cashless') || m.includes('Reimbursement'))) ? m : 'Cashless Claim (Network Garage)';
+      const baseD = get('Claim Intimated Date ', 'Claim Intimated Date', 'Claim Intimated', 'claimIntimatedDate') || get('Date of Accident', 'Date Of Accident', 'dateOfAccident') || matchedRepair?.dateOfAccident || today();
+      return calculateExpectedSettlementDate(baseD, validM);
+    })(),
+    claimSettlementDate: get('Actual Settlement Date', 'Settlement Date', 'Claim Settlement Date', 'claimSettlementDate'),
+    claimFinalStatus: get('Claim Final Status', 'claimFinalStatus'),
+    settlementPaymentMode: get('Settlement / Payout Mode', 'settlementPaymentMode'),
+    settlementRefNo: get('Payment Ref. / UTR No.', 'settlementRefNo'),
+    settlementRemarks: get('Settlement Closure Remarks', 'settlementRemarks'),
+    remarks: get('Survey Assessment & Inspection Remarks', 'Remarks', 'remarks'),
     planned: get('Planned', 'planned'),
     actual: get('Actual', 'actual'),
     delay: get('Delay', 'delay'),
-    stage1Completed: get('Stage 1 Completed', 'stage1Completed') !== undefined ? (get('Stage 1 Completed', 'stage1Completed') === true || get('Stage 1 Completed', 'stage1Completed') === 'true' || get('Stage 1 Completed', 'stage1Completed') === 'Yes') : undefined,
-    stage2Completed: get('Stage 2 Completed', 'stage2Completed') !== undefined ? (get('Stage 2 Completed', 'stage2Completed') === true || get('Stage 2 Completed', 'stage2Completed') === 'true' || get('Stage 2 Completed', 'stage2Completed') === 'Yes') : undefined,
-    stage3Completed: get('Stage 3 Completed', 'stage3Completed') !== undefined ? (get('Stage 3 Completed', 'stage3Completed') === true || get('Stage 3 Completed', 'stage3Completed') === 'true' || get('Stage 3 Completed', 'stage3Completed') === 'Yes') : undefined,
+    planned1: get('Planned 1', 'planned1'),
+    actual1: get('Actual 1', 'actual1', 'actualDate1'),
+    delay1: get('Delay 1', 'delay1'),
+    planned2: get('Planned 2', 'planned2'),
+    actual2: get('Actual 2', 'actual2', 'actualDate2'),
+    delay2: get('Delay 2', 'delay2'),
+    stage1Completed: (() => {
+      const explicit = get('Stage 1 Completed', 'stage1Completed');
+      if (explicit !== undefined && String(explicit).trim() !== '') return explicit === true || explicit === 'true' || explicit === 'Yes';
+      const act = get('Actual', 'actual');
+      const pol = get('Policy No.', 'Policy No', 'policyNo');
+      const est = get('Estimated Claim Amount (₹)', 'Estimated Claim Amount', 'Est. Amount', 'estimatedClaimAmount');
+      const st = get('Claim Current Status', 'Claim Status', 'claimStatus');
+      const sDate = get('Actual Settlement Date', 'Settlement Date', 'Claim Settlement Date', 'claimSettlementDate');
+      return !!(act && String(act).trim() !== '' && String(act).trim() !== '—') || !!(pol && String(pol).trim() !== '') || !!(est && Number(est) > 0) || st === 'Approved' || st === 'Settled' || !!sDate;
+    })(),
+    stage2Completed: (() => {
+      const explicit = get('Stage 2 Completed', 'stage2Completed');
+      if (explicit !== undefined && String(explicit).trim() !== '') return explicit === true || explicit === 'true' || explicit === 'Yes';
+      const act1 = get('Actual 1', 'actual1');
+      if (act1 && String(act1).trim() !== '' && String(act1).trim() !== '—') return true;
+      const surv = get('Survey Status', 'Survey', 'surveyStatus');
+      const st = get('Claim Current Status', 'Claim Status', 'claimStatus');
+      return surv === 'Completed' || st === 'Approved' || st === 'Settled';
+    })(),
+    stage3Completed: (() => {
+      const explicit = get('Stage 3 Completed', 'stage3Completed');
+      if (explicit !== undefined && String(explicit).trim() !== '') return explicit === true || explicit === 'true' || explicit === 'Yes';
+      const act2 = get('Actual 2', 'actual2');
+      if (act2 && String(act2).trim() !== '' && String(act2).trim() !== '—') return true;
+      const st = get('Claim Final Status', 'Claim Status', 'claimStatus');
+      const sDate = get('Actual Settlement Date', 'Settlement Date', 'claimSettlementDate');
+      return st === 'Settled' || st === 'Settled (Approved & Paid)' || (!!sDate && !!act2);
+    })(),
+    isProcessed: (() => {
+      const act = get('Actual', 'actual');
+      const pol = get('Policy No.', 'Policy No', 'policyNo');
+      return !!(act && String(act).trim() !== '' && String(act).trim() !== '—') || !!(pol && String(pol).trim() !== '');
+    })(),
     createdAt: get('Timestamp', 'createdAt') || createTimestamp(),
   };
 };
@@ -829,7 +911,7 @@ if (!localStorage.getItem(KEYS.FASTAGS)) {
 
 seed();
 
-const delay = (ms = 100) => new Promise((res) => setTimeout(res, ms));
+const delay = (ms = 0) => Promise.resolve();
 
 // Helper to match sheet keys flexibly from Google Apps Script response
 const getSheetDataFromRemote = (remoteData, candidateNames) => {
@@ -979,10 +1061,84 @@ export const syncAllFromSheets = async (silent = false) => {
       // 3. Claims
       const claimsSheet = getSheetDataFromRemote(remoteData, ['If Accident / Insurance Claims', 'claims', 'accidentclaims', 'accident_claims', 'ifaccidentinsuranceclaims']);
       if (claimsSheet && Array.isArray(claimsSheet.data)) {
-        const validMappedClaims = claimsSheet.data.map(mapSheetRowToClaim).filter(Boolean);
+        const rawMapped = claimsSheet.data.map(mapSheetRowToClaim).filter(Boolean);
+        // Deduplicate claims so duplicate rows in sheet don't flood UI
+        const seenRepairs = new Set();
+        const seenClaims = new Set();
+        const validMappedClaims = [];
+        for (const c of rawMapped) {
+          if (c.repairNo) {
+            if (seenRepairs.has(c.repairNo)) continue;
+            seenRepairs.add(c.repairNo);
+          }
+          if (c.claimNo) {
+            if (seenClaims.has(c.claimNo)) continue;
+            seenClaims.add(c.claimNo);
+          }
+          validMappedClaims.push(c);
+        }
         const currentClaims = load(KEYS.CLAIMS);
-        if (JSON.stringify(currentClaims) !== JSON.stringify(validMappedClaims)) {
-          localStorage.setItem(KEYS.CLAIMS, JSON.stringify(validMappedClaims));
+        const mergedClaims = validMappedClaims.map(c => {
+          const existing = currentClaims.find(ec => (ec.claimNo && ec.claimNo === c.claimNo) || (ec.repairNo && ec.repairNo === c.repairNo));
+          if (!existing) return c;
+
+          const hasSheetActual = !!(c.actual && String(c.actual).trim() !== '' && String(c.actual).trim() !== '—');
+          const hasSheetPolicy = !!(c.policyNo && String(c.policyNo).trim() !== '');
+          const hasSheetEst = !!(c.estimatedClaimAmount && Number(c.estimatedClaimAmount) > 0);
+          const isSheetSubmitted = hasSheetActual || hasSheetPolicy || hasSheetEst;
+
+          const merged = { ...existing };
+
+          if (!isSheetSubmitted) {
+            // Sheet has no process claim details -> reset to Pending!
+            merged.stage1Completed = false;
+            merged.stage2Completed = false;
+            merged.stage3Completed = false;
+            merged.isProcessed = false;
+            merged.actual = '';
+            merged.policyNo = '';
+            merged.insuranceCompany = c.insuranceCompany || '';
+            merged.estimatedClaimAmount = '';
+            merged.typeOfClaim = '';
+            merged.policyValidity = '';
+            merged.firRequired = 'No';
+            merged.claimMode = '';
+            merged.expectedSettlementDate = '';
+            merged.accidentPhotos = null;
+            merged.policeReport = null;
+            merged.otherDocuments = null;
+            merged.claimStatus = 'Pending Submission';
+            merged.claimSettlementDate = '';
+            merged.surveyStatus = 'Pending';
+            // Sync incident fields from sheet
+            for (const [key, val] of Object.entries(c)) {
+              if (val !== undefined && val !== null && String(val).trim() !== '' && String(val).trim() !== '—') {
+                merged[key] = val;
+              }
+            }
+          } else {
+            for (const [key, val] of Object.entries(c)) {
+              if (val !== undefined && val !== null && String(val).trim() !== '' && String(val).trim() !== '—') {
+                merged[key] = val;
+              }
+            }
+            merged.stage1Completed = c.stage1Completed !== undefined ? c.stage1Completed : (existing.stage1Completed || false);
+            merged.stage2Completed = c.stage2Completed !== undefined ? c.stage2Completed : (existing.stage2Completed || false);
+            merged.stage3Completed = c.stage3Completed !== undefined ? c.stage3Completed : (existing.stage3Completed || false);
+            merged.isProcessed = c.isProcessed !== undefined ? c.isProcessed : (existing.isProcessed || false);
+            merged.actual = c.actual || existing.actual || '';
+            if (!merged.claimMode || merged.claimMode === 'Pending' || (!merged.claimMode.includes('Cashless') && !merged.claimMode.includes('Reimbursement'))) {
+              merged.claimMode = 'Cashless Claim (Network Garage)';
+            }
+            if (!merged.expectedSettlementDate || merged.expectedSettlementDate === 'Claim Under Process' || !/^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(merged.expectedSettlementDate)) {
+              merged.expectedSettlementDate = calculateExpectedSettlementDate(merged.claimIntimatedDate || merged.dateOfAccident || today(), merged.claimMode);
+            }
+          }
+          return merged;
+        });
+
+        if (JSON.stringify(currentClaims) !== JSON.stringify(mergedClaims)) {
+          localStorage.setItem(KEYS.CLAIMS, JSON.stringify(mergedClaims));
           changed = true;
         }
       }
@@ -1036,11 +1192,6 @@ export const syncAllFromSheets = async (silent = false) => {
           }
         }
       }
-
-      // Ensure any repair with insuranceToBeClaimed === 'Yes' has its claim created and synced
-      try {
-        await syncPendingRepairClaims();
-      } catch (e) {}
 
       if (changed) {
         notifyStoreUpdate();
@@ -1237,23 +1388,139 @@ export const getRepairs = async () => {
 };
 
 // Maps a claim record to the exact "If Accident / Insurance Claims" sheet headers:
-// - Columns A:F (Cols 1 to 6): Incident info
-// - Col G (Planned) & Col I (Delay) are formula-driven and must never be touched.
-// - Col H (Actual) is set only when process claim form is submitted.
-export const claimToSheetRow = (item) => ({
-  'Claim No.': item.claimNo || '',
-  'Repair No.': item.repairNo || '',
-  'Vehicle ID': item.vehicleId || '',
-  'Car Name': item.vehicleName || item.carName || '',
-  'Date of Accident': item.dateOfAccident || '',
-  'Type Of Claim': item.typeOfClaim || 'Own Damage',
-  'Claim Mode': item.claimMode || 'Cashless Claim (Network Garage)',
-  'Expected Settlement Date': item.expectedSettlementDate || '',
-  'Settlement Date': item.claimSettlementDate || '',
-  'Stage 1 Completed': item.stage1Completed ? 'Yes' : 'No',
-  'Stage 2 Completed': item.stage2Completed ? 'Yes' : 'No',
-  'Stage 3 Completed': item.stage3Completed ? 'Yes' : 'No',
-});
+export const claimToSheetRow = (item, isInitialSync = false) => {
+  const repairs = load(KEYS.REPAIRS);
+  const matchedRepair = item.repairNo ? repairs.find(r => r.repairNo === item.repairNo) : null;
+  const cars = load(KEYS.CARS);
+  const matchedCar = (item.vehicleId || matchedRepair?.vehicleId) ? cars.find(c => c.vehicleId === (item.vehicleId || matchedRepair?.vehicleId)) : null;
+
+  const vehicle = item.vehicleName || item.carName || matchedRepair?.carName || matchedCar?.carName || '';
+  const reason = item.reasonForRepair || item.accidentReason || matchedRepair?.reasonForRepair || '';
+  const dept = item.department || matchedRepair?.department || '';
+  const vehId = item.vehicleId || matchedRepair?.vehicleId || matchedCar?.vehicleId || '';
+  const regNo = item.registrationNo || matchedRepair?.registrationNo || matchedCar?.registrationNo || '';
+  const dateAcc = item.dateOfAccident || matchedRepair?.dateOfAccident || today();
+  const accLoc = item.accidentLocation || '';
+  const timeAcc = item.timeOfAccident || matchedRepair?.timeOfAccident || '';
+  const driver = item.driverName || matchedRepair?.whoTakingCar || matchedRepair?.driverName || '';
+  const mobile = item.driverMobileNo || item.driverMobile || matchedRepair?.driverMobileNo || '';
+
+  const row = {
+    'Timestamp': item.timestamp || item.createdAt || createTimestamp(),
+    'Claim No.': item.claimNo || '',
+    'Repair No.': item.repairNo || '',
+    'Vehicle ID': vehId,
+    'Vehicle': vehicle,
+    'Car Name': vehicle,
+    'Vehicle Name': vehicle,
+    'Registration No.': regNo,
+    'Reason For Repair': reason,
+    'Reason for Repair': reason,
+    'accidentReason': reason,
+    'Department': dept,
+    'Departmen': dept,
+  };
+
+  // Only include process claim details if the claim has been explicitly submitted/processed!
+  const isSubmitted = !isInitialSync && !!(item.isProcessed || item.actual || item.stage1Completed);
+  if (isSubmitted) {
+    if (item.actual) row['Actual'] = item.actual;
+    // Process Claim Details (Cols L to AA):
+    row['Date of Accident'] = dateAcc;
+    row['Accident Location'] = accLoc;
+    row['Time of Accident'] = timeAcc;
+    row['Driver Name'] = driver;
+    row['Driver Mobile'] = mobile;
+    if (item.policyNo) row['Policy No.'] = item.policyNo;
+    if (item.insuranceCompany) row['Insurance Company'] = item.insuranceCompany;
+    if (item.estimatedClaimAmount !== undefined && item.estimatedClaimAmount !== '') {
+      row['Estimated Claim Amount (₹)'] = item.estimatedClaimAmount;
+    }
+    if (item.typeOfClaim) row['Type Of Claim'] = item.typeOfClaim;
+    if (item.policyValidity) row['Policy Validity'] = item.policyValidity;
+    if (item.firRequired) row['FIR Required?'] = item.firRequired;
+
+    const finalMode = (item.claimMode && (item.claimMode.includes('Cashless') || item.claimMode.includes('Reimbursement')))
+      ? item.claimMode
+      : 'Cashless Claim (Network Garage)';
+    row['Claim Settlement Mode'] = finalMode;
+    row['Claim Mode'] = finalMode;
+
+    const finalExp = (item.expectedSettlementDate && /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(item.expectedSettlementDate))
+      ? item.expectedSettlementDate
+      : calculateExpectedSettlementDate(item.claimIntimatedDate || dateAcc || today(), finalMode);
+    row['Expected Settlement Date'] = finalExp;
+
+    if (item.surveyStatus) {
+      row['Survey Status'] = item.surveyStatus;
+      row['Survey'] = item.surveyStatus;
+    }
+    if (item.claimStatus) {
+      row['Claim Current Status'] = item.claimStatus;
+      row['Claim Status'] = item.claimStatus;
+    }
+    if (item.claimIntimatedDate) {
+      row['Claim Intimated Date '] = item.claimIntimatedDate;
+      row['Claim Intimated Date'] = item.claimIntimatedDate;
+    }
+    if (item.claimIntimationNo) {
+      row['Claim Intimation No. / Ticket'] = item.claimIntimationNo;
+      row['Claim Intimation No.'] = item.claimIntimationNo;
+    }
+    if (item.surveyorName) row['Surveyor Name'] = item.surveyorName;
+    if (item.surveyorMobileNo) row['Surveyor Mobile No.'] = item.surveyorMobileNo;
+    if (item.surveyDate) row['Survey Date'] = item.surveyDate;
+    if (item.remarks) {
+      row['Survey Assessment & Inspection Remarks'] = item.remarks;
+      row['Remarks'] = item.remarks;
+    }
+    if (item.actual1) row['Actual 1'] = item.actual1;
+    if (item.actual2) row['Actual 2'] = item.actual2;
+    if (item.claimApprovedAmount) {
+      row['Final Approved Claim Amount (₹)'] = item.claimApprovedAmount;
+      row['Claim Approved Amount'] = item.claimApprovedAmount;
+    }
+    if (item.claimSettlementDate) {
+      row['Actual Settlement Date'] = item.claimSettlementDate;
+      row['Settlement Date'] = item.claimSettlementDate;
+    }
+    if (item.claimFinalStatus || item.claimStatus) {
+      row['Claim Final Status'] = item.claimFinalStatus || item.claimStatus;
+    }
+    if (item.settlementPaymentMode) {
+      row['Settlement / Payout Mode'] = item.settlementPaymentMode;
+    }
+    if (item.settlementRefNo) {
+      row['Payment Ref. / UTR No.'] = item.settlementRefNo;
+    }
+    if (item.settlementRemarks) {
+      row['Settlement Closure Remarks'] = item.settlementRemarks;
+    }
+    if (item.accidentPhotos) {
+      row['Accident Photos'] = typeof item.accidentPhotos === 'object' ? (item.accidentPhotos?.url || '') : (item.accidentPhotos || '');
+    }
+    if (item.policeReport) {
+      row['Police Report'] = typeof item.policeReport === 'object' ? (item.policeReport?.url || '') : (item.policeReport || '');
+    }
+    if (item.otherDocuments) {
+      const docVal = typeof item.otherDocuments === 'object' ? (item.otherDocuments?.url || '') : (item.otherDocuments || '');
+      row['Survey Report / Documents'] = docVal;
+      row['Other Documents'] = docVal;
+    }
+    if (item.paymentReceipt) {
+      const pVal = typeof item.paymentReceipt === 'object' ? (item.paymentReceipt?.url || '') : item.paymentReceipt;
+      row['Payment File / Receipt Upload'] = pVal;
+      row['Payment Receipt'] = pVal;
+      row['Payment File'] = pVal;
+      row['Payment Proof'] = pVal;
+    }
+  }
+
+  return row;
+};
+
+// Guard to prevent concurrent duplicate autoSync for the same repair
+const syncingRepairNos = new Set();
 
 // ─── AUTOMATICALLY SYNC REPAIR WITH ACCIDENT CLAIM ───────────────────────────
 export const autoSyncRepairClaim = async (repairItem) => {
@@ -1261,118 +1528,145 @@ export const autoSyncRepairClaim = async (repairItem) => {
     return null;
   }
   
-  const allClaims = load(KEYS.CLAIMS);
-  const existingClaim = allClaims.find(c => c.repairNo && c.repairNo === repairItem.repairNo);
-  const now = createTimestamp();
-
-  // Try to lookup vehicle insurance if insuranceCompany not provided
-  let insCompany = repairItem.insuranceCompany || '';
-  let polNo = repairItem.policyNo || '';
-  let polVal = repairItem.policyValidity || '';
-
-  if (!insCompany) {
-    try {
-      const allIns = load(KEYS.INSURANCE);
-      const matched = allIns.find(i => 
-        (repairItem.vehicleId && i.vehicleId === repairItem.vehicleId) || 
-        (repairItem.carName && i.carName && i.carName.toLowerCase() === repairItem.carName.toLowerCase())
-      );
-      if (matched) {
-        insCompany = matched.nameOfCompany || matched.insuranceCompany || '';
-        polNo = matched.tpPolicyNo || matched.policyNo || '';
-        polVal = matched.odEndDate || matched.tpEndDate || '';
-      }
-    } catch (e) {
-      console.warn('Error fetching insurance company for claim:', e);
-    }
+  const repNo = repairItem.repairNo;
+  if (!repNo || syncingRepairNos.has(repNo)) {
+    return null;
   }
 
-  if (existingClaim) {
-    // Update existing claim
-    const updated = {
-      ...existingClaim,
-      vehicleId: repairItem.vehicleId || existingClaim.vehicleId || '',
-      vehicleName: repairItem.carName || existingClaim.vehicleName || '',
-      dateOfAccident: repairItem.dateOfAccident || existingClaim.dateOfAccident || today(),
-      insuranceCompany: insCompany || existingClaim.insuranceCompany || '',
-      policyNo: polNo || existingClaim.policyNo || '',
-      policyValidity: polVal || existingClaim.policyValidity || '',
-      estimatedClaimAmount: repairItem.estimatedClaimAmount !== undefined && repairItem.estimatedClaimAmount !== '' ? repairItem.estimatedClaimAmount : (existingClaim.estimatedClaimAmount || ''),
-      typeOfClaim: repairItem.typeOfClaim || existingClaim.typeOfClaim || 'Own Damage',
-      accidentReason: repairItem.reasonForRepair || existingClaim.accidentReason || '',
-      driverName: repairItem.whoTakingCar || existingClaim.driverName || '',
-      accidentLocation: repairItem.garage || existingClaim.accidentLocation || '',
-      updatedAt: now
-    };
-    const idx = allClaims.findIndex(c => c.claimNo === existingClaim.claimNo);
-    allClaims[idx] = updated;
-    save(KEYS.CLAIMS, allClaims);
+  syncingRepairNos.add(repNo);
+  try {
+    const allClaims = load(KEYS.CLAIMS);
+    const existingClaim = allClaims.find(c => c.repairNo && c.repairNo === repNo);
+    const now = createTimestamp();
 
-    await sendToSheet({
-      action: 'update',
-      sheetName: 'If Accident / Insurance Claims',
-      keyField: 'Claim No.',
-      keyValue: existingClaim.claimNo,
-      data: claimToSheetRow(updated)
-    });
-    return updated;
-  } else {
-    // Auto-create new claim
-    const claimNo = generateClaimNo(allClaims);
-    const newClaim = {
-      id: generateId(),
-      claimNo,
-      repairNo: repairItem.repairNo,
-      vehicleId: repairItem.vehicleId || '',
-      vehicleName: repairItem.carName || '',
-      registrationNo: repairItem.registrationNo || '',
-      dateOfAccident: repairItem.dateOfAccident || today(),
-      timeOfAccident: repairItem.timeOfAccident || '',
-      accidentLocation: repairItem.garage || '',
-      accidentReason: repairItem.reasonForRepair || '',
-      driverName: repairItem.whoTakingCar || '',
-      driverMobileNo: repairItem.driverMobileNo || '',
-      insuranceCompany: insCompany,
-      policyNo: polNo,
-      policyValidity: polVal,
-      insuranceClaim: 'Yes',
-      estimatedClaimAmount: repairItem.estimatedClaimAmount || '',
-      typeOfClaim: repairItem.typeOfClaim || 'Own Damage',
-      claimMode: repairItem.claimMode || 'Cashless Claim (Network Garage)',
-      accidentPhotos: null,
-      firRequired: 'No',
-      firCopy: null,
-      policeReport: null,
-      otherDocuments: null,
-      stage1Completed: false,
-      stage2Completed: false,
-      stage3Completed: false,
-      claimIntimatedDate: today(),
-      claimIntimationNo: '',
-      surveyorName: '',
-      surveyorMobileNo: '',
-      surveyDate: '',
-      surveyStatus: repairItem.surveyStatus || 'Pending',
-      claimStatus: repairItem.claimStatus || 'Claim Under Process',
-      claimApprovedAmount: '',
-      claimRejectedReason: '',
-      claimSettlementDate: '',
-      remarks: '',
-      timestamp: now,
-      createdAt: now
-    };
-    allClaims.push(newClaim);
-    save(KEYS.CLAIMS, allClaims);
+    // Resolve vehicle name, reason, department, registrationNo robustly
+    const cars = load(KEYS.CARS);
+    const matchedCar = repairItem.vehicleId ? cars.find(c => c.vehicleId === repairItem.vehicleId) : null;
+    const resolvedVehicleName = repairItem.carName || repairItem.vehicleName || matchedCar?.carName || '';
+    const resolvedReason = repairItem.reasonForRepair || repairItem.accidentReason || '';
+    const resolvedDept = repairItem.department || '';
+    const resolvedRegNo = repairItem.registrationNo || matchedCar?.registrationNo || '';
+    const resolvedDriverName = repairItem.whoTakingCar || repairItem.driverName || '';
+    const resolvedDriverMobile = repairItem.driverMobileNo || '';
 
-    await sendToSheet({
-      action: 'add',
-      sheetName: 'If Accident / Insurance Claims',
-      data: {
-        'Timestamp': now,
-        ...claimToSheetRow(newClaim),
+    // Try to lookup vehicle insurance if insuranceCompany not provided
+    let insCompany = repairItem.insuranceCompany || '';
+    let polNo = repairItem.policyNo || '';
+    let polVal = repairItem.policyValidity || '';
+
+    if (!insCompany) {
+      try {
+        const allIns = load(KEYS.INSURANCE);
+        const matched = allIns.find(i => 
+          (repairItem.vehicleId && i.vehicleId === repairItem.vehicleId) || 
+          (repairItem.carName && i.carName && i.carName.toLowerCase() === repairItem.carName.toLowerCase())
+        );
+        if (matched) {
+          insCompany = matched.nameOfCompany || matched.insuranceCompany || '';
+          polNo = matched.tpPolicyNo || matched.policyNo || '';
+          polVal = matched.odEndDate || matched.tpEndDate || '';
+        }
+      } catch (e) {
+        console.warn('Error fetching insurance company for claim:', e);
       }
-    });
-    return newClaim;
+    }
+
+    if (existingClaim) {
+      // Update existing claim
+      const updated = {
+        ...existingClaim,
+        vehicleId: repairItem.vehicleId || existingClaim.vehicleId || '',
+        vehicleName: resolvedVehicleName || existingClaim.vehicleName || '',
+        carName: resolvedVehicleName || existingClaim.carName || '',
+        registrationNo: resolvedRegNo || existingClaim.registrationNo || '',
+        dateOfAccident: repairItem.dateOfAccident || existingClaim.dateOfAccident || today(),
+        insuranceCompany: insCompany || existingClaim.insuranceCompany || '',
+        policyNo: polNo || existingClaim.policyNo || '',
+        policyValidity: polVal || existingClaim.policyValidity || '',
+        estimatedClaimAmount: repairItem.estimatedClaimAmount !== undefined && repairItem.estimatedClaimAmount !== '' ? repairItem.estimatedClaimAmount : (existingClaim.estimatedClaimAmount || ''),
+        typeOfClaim: repairItem.typeOfClaim || existingClaim.typeOfClaim || '',
+        accidentReason: resolvedReason || existingClaim.accidentReason || '',
+        reasonForRepair: resolvedReason || existingClaim.reasonForRepair || existingClaim.accidentReason || '',
+        department: resolvedDept || existingClaim.department || '',
+        driverName: resolvedDriverName || existingClaim.driverName || '',
+        driverMobileNo: resolvedDriverMobile || existingClaim.driverMobileNo || '',
+        timeOfAccident: repairItem.timeOfAccident || existingClaim.timeOfAccident || '',
+        accidentLocation: existingClaim.accidentLocation || '',
+        updatedAt: now
+      };
+      const idx = allClaims.findIndex(c => c.claimNo === existingClaim.claimNo);
+      allClaims[idx] = updated;
+      save(KEYS.CLAIMS, allClaims);
+
+      await sendToSheet({
+        action: 'update',
+        sheetName: 'If Accident / Insurance Claims',
+        keyField: 'Claim No.',
+        keyValue: existingClaim.claimNo,
+        data: claimToSheetRow(updated)
+      });
+      return updated;
+    } else {
+      // Auto-create new claim
+      const claimNo = generateClaimNo(allClaims);
+      const newClaim = {
+        id: generateId(),
+        claimNo,
+        repairNo: repNo,
+        vehicleId: repairItem.vehicleId || '',
+        vehicleName: resolvedVehicleName,
+        carName: resolvedVehicleName,
+        registrationNo: resolvedRegNo,
+        department: resolvedDept,
+        reasonForRepair: resolvedReason,
+        dateOfAccident: repairItem.dateOfAccident || today(),
+        timeOfAccident: repairItem.timeOfAccident || '',
+        accidentLocation: '',
+        accidentReason: resolvedReason,
+        driverName: resolvedDriverName,
+        driverMobileNo: resolvedDriverMobile,
+        insuranceCompany: '',
+        policyNo: '',
+        policyValidity: '',
+        insuranceClaim: 'Yes',
+        estimatedClaimAmount: '',
+        typeOfClaim: '',
+        claimMode: '',
+        accidentPhotos: null,
+        firRequired: '',
+        firCopy: null,
+        policeReport: null,
+        otherDocuments: null,
+        stage1Completed: false,
+        stage2Completed: false,
+        stage3Completed: false,
+        claimIntimatedDate: '',
+        claimIntimationNo: '',
+        surveyorName: '',
+        surveyorMobileNo: '',
+        surveyDate: '',
+        surveyStatus: '',
+        claimStatus: 'Pending Submission',
+        claimApprovedAmount: '',
+        claimRejectedReason: '',
+        claimSettlementDate: '',
+        remarks: '',
+        timestamp: now,
+        createdAt: now
+      };
+      allClaims.push(newClaim);
+      save(KEYS.CLAIMS, allClaims);
+
+      // On initial auto-sync from repair, ONLY sync initial requirement columns (Cols A to G)!
+      await sendToSheet({
+        action: 'add',
+        sheetName: 'If Accident / Insurance Claims',
+        data: claimToSheetRow(newClaim, true)
+      });
+      return newClaim;
+    }
+  } finally {
+    syncingRepairNos.delete(repNo);
   }
 };
 
@@ -1464,8 +1758,88 @@ export const deleteRepair = async (repairNo) => {
 // ─── CLAIMS CRUD ──────────────────────────────────────────────────────────────
 export const getClaims = async () => {
   await delay();
-  await syncPendingRepairClaims();
-  return load(KEYS.CLAIMS);
+  const claims = load(KEYS.CLAIMS);
+  const seenRepairs = new Set();
+  const seenClaims = new Set();
+  const deduplicated = [];
+  const repairs = load(KEYS.REPAIRS);
+  let modified = false;
+
+  for (const c of claims) {
+    if (c.repairNo) {
+      if (seenRepairs.has(c.repairNo)) { modified = true; continue; }
+      seenRepairs.add(c.repairNo);
+    }
+    if (c.claimNo) {
+      if (seenClaims.has(c.claimNo)) { modified = true; continue; }
+      seenClaims.add(c.claimNo);
+    }
+
+    // Auto-fix corrupted claimMode ('Pending') and expectedSettlementDate ('Claim Under Process'):
+    if (!c.claimMode || c.claimMode === 'Pending' || (!c.claimMode.includes('Cashless') && !c.claimMode.includes('Reimbursement'))) {
+      c.claimMode = 'Cashless Claim (Network Garage)';
+      modified = true;
+    }
+    if (!c.expectedSettlementDate || c.expectedSettlementDate === 'Claim Under Process' || !/^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(c.expectedSettlementDate)) {
+      c.expectedSettlementDate = calculateExpectedSettlementDate(c.claimIntimatedDate || c.dateOfAccident || today(), c.claimMode);
+      modified = true;
+    }
+
+    // Auto-fix accidentLocation if it was mistakenly set to garage name
+    const matchedRep = c.repairNo ? repairs.find(r => r.repairNo === c.repairNo) : null;
+    if (matchedRep?.garage && c.accidentLocation === matchedRep.garage) {
+      c.accidentLocation = '';
+      modified = true;
+    }
+
+    // Auto-fix claims where process data was cleared in sheet:
+    const hasActual = !!(c.actual && String(c.actual).trim() !== '' && String(c.actual).trim() !== '—');
+    const hasPolicy = !!(c.policyNo && String(c.policyNo).trim() !== '');
+    const hasEstAmount = !!(c.estimatedClaimAmount && Number(c.estimatedClaimAmount) > 0);
+    const isSettled = c.claimStatus === 'Settled' || !!c.claimSettlementDate;
+    const isStage2or3 = c.stage2Completed === true || c.stage3Completed === true;
+
+    if (!hasActual && !hasPolicy && !hasEstAmount && !isSettled && !isStage2or3) {
+      if (c.stage1Completed || c.isProcessed || c.policyNo || c.actual) {
+        c.stage1Completed = false;
+        c.stage2Completed = false;
+        c.stage3Completed = false;
+        c.isProcessed = false;
+        c.actual = '';
+        c.policyNo = '';
+        c.insuranceCompany = '';
+        c.estimatedClaimAmount = '';
+        c.typeOfClaim = '';
+        c.policyValidity = '';
+        c.firRequired = 'No';
+        c.claimMode = '';
+        c.expectedSettlementDate = '';
+        c.accidentPhotos = null;
+        c.policeReport = null;
+        c.otherDocuments = null;
+        c.claimStatus = 'Pending Submission';
+        c.claimSettlementDate = '';
+        c.surveyStatus = 'Pending';
+        modified = true;
+      }
+    }
+
+    // Auto-fix claims that completed Stage 1 but have not done Stage 2 (Survey is Pending, not Approved/Settled):
+    if ((!c.surveyStatus || c.surveyStatus === 'Pending') && c.claimStatus !== 'Approved' && c.claimStatus !== 'Settled') {
+      if (c.stage2Completed || c.stage3Completed || c.claimSettlementDate) {
+        c.stage2Completed = false;
+        c.stage3Completed = false;
+        c.claimSettlementDate = '';
+        modified = true;
+      }
+    }
+
+    deduplicated.push(c);
+  }
+  if (modified || deduplicated.length !== claims.length) {
+    save(KEYS.CLAIMS, deduplicated);
+  }
+  return deduplicated;
 };
 
 export const addClaim = async (claim) => {
@@ -1516,10 +1890,34 @@ export const processAccidentClaim = async (claimNo, processData) => {
   const idx = all.findIndex(c => c.claimNo === claimNo);
   if (idx === -1) throw new Error('Claim not found');
   const now = createTimestamp();
+  const validMode = (processData.claimMode && (processData.claimMode.includes('Cashless') || processData.claimMode.includes('Reimbursement')))
+    ? processData.claimMode
+    : (all[idx].claimMode && (all[idx].claimMode.includes('Cashless') || all[idx].claimMode.includes('Reimbursement')) ? all[idx].claimMode : 'Cashless Claim (Network Garage)');
+  
+  const validExp = (processData.expectedSettlementDate && /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(processData.expectedSettlementDate))
+    ? processData.expectedSettlementDate
+    : calculateExpectedSettlementDate(processData.claimIntimatedDate || processData.dateOfAccident || all[idx].claimIntimatedDate || all[idx].dateOfAccident || today(), validMode);
+
+  const isStage2 = !!(processData.stage2Completed || all[idx].stage2Completed);
+  const isStage3 = !!(processData.stage3Completed || all[idx].stage3Completed);
+
+  if (isStage2 && !all[idx].actual1) {
+    all[idx].actual1 = now;
+    all[idx].actualDate1 = now;
+  }
+  if (isStage3 && !all[idx].actual2) {
+    all[idx].actual2 = now;
+    all[idx].actualDate2 = now;
+  }
+  if (!all[idx].actual) {
+    all[idx].actual = now;
+  }
+
   all[idx] = {
     ...all[idx],
     ...processData,
-    actual: now,
+    claimMode: validMode,
+    expectedSettlementDate: validExp,
     isProcessed: true,
     updatedAt: now
   };
@@ -1527,8 +1925,17 @@ export const processAccidentClaim = async (claimNo, processData) => {
 
   const sheetData = {
     ...claimToSheetRow(all[idx]),
-    'Actual': now,
-    // Process Claim Details columns (matching sheet headers shown in image)
+    'Actual': all[idx].actual || now,
+    ...(isStage2 ? { 'Actual 1': all[idx].actual1 || now } : (all[idx].actual1 ? { 'Actual 1': all[idx].actual1 } : {})),
+    ...(isStage3 ? { 'Actual 2': all[idx].actual2 || now } : (all[idx].actual2 ? { 'Actual 2': all[idx].actual2 } : {})),
+
+    // Stage 1 Fields
+    'Registration No.': all[idx].registrationNo || '',
+    'Date of Accident': all[idx].dateOfAccident || '',
+    'Accident Location': all[idx].accidentLocation || '',
+    'Time of Accident': all[idx].timeOfAccident || '',
+    'Driver Name': all[idx].driverName || '',
+    'Driver Mobile': all[idx].driverMobileNo || all[idx].driverMobile || '',
     'Policy No.': all[idx].policyNo || '',
     'Insurance Company': all[idx].insuranceCompany || '',
     'Insurance Comp': all[idx].insuranceCompany || '',
@@ -1536,31 +1943,52 @@ export const processAccidentClaim = async (claimNo, processData) => {
     'Estimated Claim': all[idx].estimatedClaimAmount || '',
     'Estimated Claim Amount (₹)': all[idx].estimatedClaimAmount || '',
     'Type Of Claim': all[idx].typeOfClaim || 'Own Damage',
-    'Claim Mode': all[idx].claimMode || 'Cashless Claim (Network Garage)',
-    'Expected Settlement Date': all[idx].expectedSettlementDate || '',
+    'Claim Settlement Mode': validMode,
+    'Claim Mode': validMode,
+    'Expected Settlement Date': validExp,
     'Policy Validity': all[idx].policyValidity || '',
     'FIR Required?': all[idx].firRequired || 'No',
     'FIR Required': all[idx].firRequired || 'No',
-    'Survey': all[idx].surveyStatus || 'Pending',
-    'Survey Status': all[idx].surveyStatus || 'Pending',
-    'Claim Status': all[idx].claimStatus || 'Claim Under Process',
+
+    // Stage 2 ("Claim Intimation & Surveyor Appointment") Columns - exactly matching Sheet Row 6
+    'Claim Intimated Date ': all[idx].claimIntimatedDate || '',
     'Claim Intimated Date': all[idx].claimIntimatedDate || '',
-    'Claim Intimated': all[idx].claimIntimatedDate || '',
+    'Claim Intimation No. / Ticket': all[idx].claimIntimationNo || '',
     'Claim Intimation No.': all[idx].claimIntimationNo || '',
     'Claim Intimation': all[idx].claimIntimationNo || '',
+    'Surveyor Name': all[idx].surveyorName || '',
+    'Surveyor Mobile No.': all[idx].surveyorMobileNo || '',
     'Survey Date': all[idx].surveyDate || '',
-    'Settlement Date': all[idx].claimSettlementDate || '',
+    'Survey Status': all[idx].surveyStatus || 'Pending',
+    'Survey': all[idx].surveyStatus || 'Pending',
+    'Claim Current Status': all[idx].claimStatus || 'Claim Under Process',
+    'Claim Status': all[idx].claimStatus || 'Claim Under Process',
+    'Survey Assessment & Inspection Remarks': all[idx].remarks || '',
+    'Remarks': all[idx].remarks || '',
+    'Survey Report / Documents': typeof all[idx].otherDocuments === 'string' ? all[idx].otherDocuments : (all[idx].otherDocuments?.url || ''),
+    'Other Documents': typeof all[idx].otherDocuments === 'string' ? all[idx].otherDocuments : (all[idx].otherDocuments?.url || ''),
+
+    // Stage 3 ("Final Settlement & Payout Details") Columns - exactly matching Sheet Row 6 (Cols AO to AX):
+    'Final Approved Claim Amount (₹)': all[idx].claimApprovedAmount || all[idx].estimatedClaimAmount || '',
+    'Claim Approved Amount': all[idx].claimApprovedAmount || all[idx].estimatedClaimAmount || '',
+    'Actual Settlement Date': all[idx].claimSettlementDate || today(),
+    'Settlement Date': all[idx].claimSettlementDate || today(),
+    'Claim Final Status': all[idx].claimFinalStatus || all[idx].claimStatus || 'Settled (Approved & Paid)',
+    'Settlement / Payout Mode': all[idx].settlementPaymentMode || 'Direct to Network Garage (Cashless)',
+    'Payment Ref. / UTR No.': all[idx].settlementRefNo || '',
+    'Payment File / Receipt Upload': typeof all[idx].paymentReceipt === 'string' ? all[idx].paymentReceipt : (all[idx].paymentReceipt?.url || ''),
+    'Payment Receipt': typeof all[idx].paymentReceipt === 'string' ? all[idx].paymentReceipt : (all[idx].paymentReceipt?.url || ''),
+    'Payment File': typeof all[idx].paymentReceipt === 'string' ? all[idx].paymentReceipt : (all[idx].paymentReceipt?.url || ''),
+    'Payment Proof': typeof all[idx].paymentReceipt === 'string' ? all[idx].paymentReceipt : (all[idx].paymentReceipt?.url || ''),
+    'Payment Document': typeof all[idx].paymentReceipt === 'string' ? all[idx].paymentReceipt : (all[idx].paymentReceipt?.url || ''),
+    'Settlement Closure Remarks': all[idx].settlementRemarks || '',
+
+    // Photos / Reports
     'Accident Photos': typeof all[idx].accidentPhotos === 'string' ? all[idx].accidentPhotos : (all[idx].accidentPhotos?.url || ''),
     'Accident Photo': typeof all[idx].accidentPhotos === 'string' ? all[idx].accidentPhotos : (all[idx].accidentPhotos?.url || ''),
     'Police Report': typeof all[idx].policeReport === 'string' ? all[idx].policeReport : (all[idx].policeReport?.url || ''),
-    'Other Documents': typeof all[idx].otherDocuments === 'string' ? all[idx].otherDocuments : (all[idx].otherDocuments?.url || ''),
-    'Other Document': typeof all[idx].otherDocuments === 'string' ? all[idx].otherDocuments : (all[idx].otherDocuments?.url || ''),
     'FIR Copy': typeof all[idx].firCopy === 'string' ? all[idx].firCopy : (all[idx].firCopy?.url || ''),
-    'Surveyor Name': all[idx].surveyorName || '',
-    'Surveyor Mobile No.': all[idx].surveyorMobileNo || '',
-    'Claim Approved Amount': all[idx].claimApprovedAmount || '',
-    'Claim Rejected Reason': all[idx].claimRejectedReason || '',
-    'Remarks': all[idx].remarks || ''
+    'Claim Rejected Reason': all[idx].claimRejectedReason || ''
   };
 
   await sendToSheet({

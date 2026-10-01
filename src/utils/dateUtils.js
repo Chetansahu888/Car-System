@@ -17,17 +17,33 @@ export const parseAnyDate = (dateStr) => {
   if (dateStr instanceof Date) return isValid(dateStr) ? dateStr : null;
   if (typeof dateStr !== 'string') return null;
   
-  // if format M/D/YYYY HH:mm:ss or M/D/YYYY
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(dateStr)) {
-    const parts = dateStr.split(' ');
-    const [p1, p2, year] = parts[0].split('/').map(Number);
-    // if p1 <= 12 and p2 > 12 -> month/day/year
-    // if p1 > 12 -> day/month/year
-    let month = p1;
-    let day = p2;
-    if (p1 > 12) {
-      day = p1;
-      month = p2;
+  const trimmed = dateStr.trim();
+  if (!trimmed) return null;
+
+  // 1. Format: YYYY-MM-DD or YYYY/MM/DD (with optional time)
+  if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(trimmed)) {
+    try {
+      const d = parseISO(trimmed);
+      if (isValid(d)) return d;
+    } catch {}
+    const parts = trimmed.split(' ');
+    const [y, m, d] = parts[0].split(/[-/]/).map(Number);
+    const dt = new Date(y, m - 1, d);
+    if (isValid(dt)) return dt;
+  }
+
+  // 2. Format: DD-MM-YYYY or DD/MM/YYYY or M/D/YYYY (with optional time)
+  if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(trimmed)) {
+    const parts = trimmed.split(' ');
+    const sep = trimmed.includes('/') ? '/' : '-';
+    const [p1, p2, year] = parts[0].split(sep).map(Number);
+    // If p1 > 12, it must be DD-MM-YYYY
+    // Otherwise standard Indian/international context: p1 = DD, p2 = MM
+    let day = p1;
+    let month = p2;
+    if (p1 <= 12 && p2 > 12) {
+      month = p1;
+      day = p2;
     }
     const d = new Date(year, month - 1, day);
     if (parts[1]) {
@@ -40,11 +56,11 @@ export const parseAnyDate = (dateStr) => {
   }
   
   try {
-    const d = parseISO(dateStr);
+    const d = parseISO(trimmed);
     if (isValid(d)) return d;
   } catch {}
   
-  const d = new Date(dateStr);
+  const d = new Date(trimmed);
   return isValid(d) ? d : null;
 };
 
