@@ -97,16 +97,28 @@ export const toInputDate = (date) => {
   }
 };
 
-// Insurance renewal: date + 1 year - 1 day
-export const calcInsuranceRenewal = (insuranceDate) => {
+// Insurance policy end date / renewal: date + tenure (years) - 1 day (IRDAI Rule: 1 year for OD/PA, 3 years for New Car TP)
+export const calcInsuranceRenewal = (insuranceDate, years = 1) => {
   if (!insuranceDate) return null;
   try {
     const d = parseAnyDate(insuranceDate);
     if (!d) return null;
-    return subDays(addYears(d, 1), 1);
+    return subDays(addYears(d, Number(years) || 1), 1);
   } catch {
     return null;
   }
+};
+
+export const calcPolicyEndDate = calcInsuranceRenewal;
+
+// Find the earliest upcoming renewal date among active cover end dates
+export const calcEarliestCoverRenewal = (...endDates) => {
+  const valid = endDates
+    .filter(Boolean)
+    .map(d => ({ raw: d, parsed: parseAnyDate(d) }))
+    .filter(x => x.parsed && !isNaN(x.parsed.getTime()))
+    .sort((a, b) => a.parsed.getTime() - b.parsed.getTime());
+  return valid.length > 0 ? valid[0].raw : null;
 };
 
 // Pollution renewal: date + 1 year

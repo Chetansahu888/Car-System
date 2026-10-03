@@ -1,10 +1,11 @@
 // pages/Insurance.jsx
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, Plus, Search, Eye, X, AlertTriangle, CheckCircle, Clock, Car, CreditCard, ShieldCheck, RefreshCw, Calendar, Sparkles, Lock } from 'lucide-react';
+import { Shield, Plus, Search, Eye, X, AlertTriangle, CheckCircle, Clock, Car, CreditCard, ShieldCheck, RefreshCw, Calendar, Sparkles, Lock, FileText, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getCars, getInsurance, addInsurance, renewInsurance } from '../store/dataStore';
-import { calcInsuranceRenewal, formatDate, daysUntil, today, toInputDate } from '../utils/dateUtils';
-import { generateId } from '../utils/idGenerator';
+import { uploadFileToDrive } from '../api/googleSheetsClient';
+import { calcInsuranceRenewal, calcEarliestCoverRenewal, formatDate, daysUntil, today, toInputDate, parseAnyDate, createTimestamp } from '../utils/dateUtils';
+import { generateId, generateInsuranceId, generateRenewalId } from '../utils/idGenerator';
 import { validateForm, required } from '../utils/validators';
 import { ITEMS_PER_PAGE } from '../constants';
 import { useAuth, PAGE_KEYS } from '../context/AuthContext';
@@ -14,18 +15,22 @@ import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import EmptyState from '../components/ui/EmptyState';
 import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
+import FileUpload from '../components/ui/FileUpload';
 
 const EMPTY_FORM = {
   vehicleId: '', date: '', carName: '', nameOfCompany: '',
   hasOwnDamage: 'Yes',
+  odTenure: '1',
   odStartDate: '',
   odEndDate: '',
   hasThirdParty: 'Yes',
+  tpTenure: '3',
   tpPolicyNo: '',
   tpStartDate: '',
   tpEndDate: '',
   tppdLimit: '750000',
   hasPaCover: 'Yes',
+  paTenure: '1',
   paCoverType: 'Owner-Driver CPA (₹15 Lakhs)',
   paSumInsured: '1500000',
   paPremium: '',
@@ -40,6 +45,7 @@ const EMPTY_FORM = {
   taxAmount: '', totalPremiumAmount: '',
   claimedLastYear: 'No', policyInclusiveOfNcb: 'No', premiumOfNcb: '',
   cashlessPolicy: 'Yes',
+  copyOfInsurance: null,
 };
 
 const FORM_RULES = { vehicleId: [required], date: [required], nameOfCompany: [required] };
@@ -106,6 +112,17 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
       } else if (field === 'totalPremiumAmount') {
         updated.totalPremiumToBePaid = value;
       }
+      if (field === 'date' && value) {
+        const odRen = calcInsuranceRenewal(value, 1);
+        const tpRen = calcInsuranceRenewal(value, updated.tpTenure || 3);
+        const paRen = calcInsuranceRenewal(value, updated.paTenure || 1);
+        if (!updated.odStartDate) updated.odStartDate = value;
+        updated.odEndDate = odRen ? toInputDate(odRen) : updated.odEndDate;
+        if (!updated.tpStartDate) updated.tpStartDate = value;
+        updated.tpEndDate = tpRen ? toInputDate(tpRen) : updated.tpEndDate;
+        if (!updated.paStartDate) updated.paStartDate = value;
+        updated.paEndDate = paRen ? toInputDate(paRen) : updated.paEndDate;
+      }
       return updated;
     });
   };
@@ -124,11 +141,31 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
     if (already) { toast.error('Insurance already exists for this vehicle. Please use "Renew Update" to renew.'); return; }
     setSaving(true);
     try {
-      const renewal = calcInsuranceRenewal(form.date);
+      let copyOfInsUrl = form.copyOfInsurance;
+      if (form.copyOfInsurance?.url && form.copyOfInsurance.url.startsWith('data:')) {
+        const driveUrl = await uploadFileToDrive(
+          form.copyOfInsurance.url,
+          form.copyOfInsurance.name || `${form.vehicleId || 'vehicle'}_Insurance_${Date.now()}`,
+          form.copyOfInsurance.type || 'application/pdf'
+        );
+        if (driveUrl) copyOfInsUrl = driveUrl;
+      } else if (form.copyOfInsurance?.url) {
+        copyOfInsUrl = form.copyOfInsurance.url;
+      }
+
+      const renewal = calcInsuranceRenewal(form.date, 1);
+      const activeEnds = [];
+      if (form.hasOwnDamage !== 'No' && form.odEndDate) activeEnds.push(form.odEndDate);
+      if (form.hasThirdParty !== 'No' && form.tpEndDate) activeEnds.push(form.tpEndDate);
+      if (form.hasPaCover !== 'No' && form.paEndDate) activeEnds.push(form.paEndDate);
+      const earliestRenewal = calcEarliestCoverRenewal(...activeEnds) || (renewal ? toInputDate(renewal) : '');
+
       await addInsurance({
-        ...form, id: generateId(),
-        validityDate: renewal ? toInputDate(renewal) : '',
-        renewalDate: renewal ? toInputDate(renewal) : '',
+        ...form,
+        copyOfInsurance: copyOfInsUrl,
+        id: generateId(),
+        validityDate: earliestRenewal,
+        renewalDate: earliestRenewal,
         timestamp: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       });
@@ -242,7 +279,7 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
                 value={form.odStartDate || ''}
                 onChange={e => {
                   const sDate = e.target.value;
-                  const ren = sDate ? calcInsuranceRenewal(sDate) : null;
+                  const ren = sDate ? calcInsuranceRenewal(sDate, 1) : null;
                   setForm(f => ({
                     ...f,
                     odStartDate: sDate,
@@ -366,7 +403,28 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
             <div className="form-section-icon"><Shield size={18} strokeWidth={2.2} /></div>
             <div className="form-section-title">Third Party (TP) Insurance Details</div>
           </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
+            <div className="form-group">
+              <label className="form-label">TP Policy Tenure <span className="required">*</span></label>
+              <select
+                className="form-select"
+                value={form.tpTenure || '3'}
+                onChange={e => {
+                  const tenure = e.target.value;
+                  const sDate = form.tpStartDate || form.date;
+                  const ren = sDate ? calcInsuranceRenewal(sDate, tenure) : null;
+                  setForm(f => ({
+                    ...f,
+                    tpTenure: tenure,
+                    tpEndDate: ren ? toInputDate(ren) : f.tpEndDate
+                  }));
+                }}
+              >
+                <option value="3">3 Years</option>
+                <option value="1">1 Year</option>
+              </select>
+            </div>
             <div className="form-group">
               <label className="form-label">TP Policy Start Date</label>
               <input
@@ -375,7 +433,7 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
                 value={form.tpStartDate || ''}
                 onChange={e => {
                   const sDate = e.target.value;
-                  const ren = sDate ? calcInsuranceRenewal(sDate) : null;
+                  const ren = sDate ? calcInsuranceRenewal(sDate, form.tpTenure || 3) : null;
                   setForm(f => ({
                     ...f,
                     tpStartDate: sDate,
@@ -443,6 +501,26 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
               </select>
             </div>
             <div className="form-group">
+              <label className="form-label">PA Cover Tenure</label>
+              <select
+                className="form-select"
+                value={form.paTenure || '1'}
+                onChange={e => {
+                  const tenure = e.target.value;
+                  const sDate = form.paStartDate || form.date;
+                  const ren = sDate ? calcInsuranceRenewal(sDate, tenure) : null;
+                  setForm(f => ({
+                    ...f,
+                    paTenure: tenure,
+                    paEndDate: ren ? toInputDate(ren) : f.paEndDate
+                  }));
+                }}
+              >
+                <option value="1">1 Year</option>
+                <option value="3">3 Years</option>
+              </select>
+            </div>
+            <div className="form-group">
               <label className="form-label">PA Sum Insured (₹)</label>
               <input
                 type="number"
@@ -470,7 +548,7 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
                 value={form.paStartDate || ''}
                 onChange={e => {
                   const sDate = e.target.value;
-                  const ren = sDate ? calcInsuranceRenewal(sDate) : null;
+                  const ren = sDate ? calcInsuranceRenewal(sDate, form.paTenure || 1) : null;
                   setForm(f => ({
                     ...f,
                     paStartDate: sDate,
@@ -585,6 +663,21 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
         );
       })()}
 
+      {/* ─── 5. Copy Of Insurance Upload ─── */}
+      <div className="form-section-header" style={{ marginTop: 24 }}>
+        <div className="form-section-icon"><Upload size={18} strokeWidth={2.2} /></div>
+        <div className="form-section-title">Copy Of Insurance (PDF / Document)</div>
+      </div>
+      <div style={{ marginBottom: 20 }}>
+        <FileUpload
+          id="ins-copy-add"
+          label="Upload Copy Of Insurance (PDF or Image)"
+          accept=".pdf,image/*"
+          value={form.copyOfInsurance}
+          onChange={val => set('copyOfInsurance', val)}
+        />
+      </div>
+
       <div className="modal-footer" style={{ padding: '20px 0 0' }}>
         <button type="button" className="btn btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
         <button type="submit" className="btn btn-primary" disabled={saving}>
@@ -596,10 +689,13 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
 };
 
 // ─── Renewal Update Modal Form ────────────────────────────────────────────────
-const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
+const RenewalUpdateModal = ({ car, existingIns, allInsurance = [], onClose, onSaved }) => {
   const existingOdEnd = existingIns?.odEndDate || existingIns?.renewalDate || existingIns?.validityDate || '';
   const existingTpEnd = existingIns?.tpEndDate || '';
   const existingPaEnd = existingIns?.paEndDate || '';
+
+  const nextRenewalId = generateRenewalId(allInsurance || []);
+  const [renewalId, setRenewalId] = useState(nextRenewalId);
 
   const getCoverStatus = (endDateStr) => {
     if (!endDateStr) return { isDue: true, days: null, text: 'No Date Recorded (Due for Renewal)' };
@@ -618,6 +714,8 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
   const [renewOd, setRenewOd] = useState(odStatus.isDue);
   const [renewTp, setRenewTp] = useState(tpStatus.isDue);
   const [renewPa, setRenewPa] = useState(paStatus.isDue);
+  const [renewTpTenure, setRenewTpTenure] = useState('1');
+  const [renewPaTenure, setRenewPaTenure] = useState('1');
 
   const [form, setForm] = useState({
     date: '',
@@ -666,6 +764,7 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
     taxAmount: '0',
     totalPremiumAmount: '0',
     totalPremiumToBePaid: '0',
+    copyOfInsurance: existingIns?.copyOfInsurance || null,
   });
   const [saving, setSaving] = useState(false);
 
@@ -691,19 +790,20 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
 
       // Auto-set sub-dates when main renewal start date is picked
       if (field === 'date') {
-        const ren = val ? calcInsuranceRenewal(val) : null;
-        const renStr = ren ? toInputDate(ren) : '';
+        const renStrOd = val ? toInputDate(calcInsuranceRenewal(val, 1)) : '';
+        const renStrTp = val ? toInputDate(calcInsuranceRenewal(val, renewTpTenure || 1)) : '';
+        const renStrPa = val ? toInputDate(calcInsuranceRenewal(val, renewPaTenure || 1)) : '';
         if (renewOd) {
           if (!updated.odStartDate) updated.odStartDate = val;
-          if (!updated.odEndDate) updated.odEndDate = renStr;
+          if (!updated.odEndDate) updated.odEndDate = renStrOd;
         }
         if (renewTp) {
           if (!updated.tpStartDate) updated.tpStartDate = val;
-          if (!updated.tpEndDate) updated.tpEndDate = renStr;
+          if (!updated.tpEndDate) updated.tpEndDate = renStrTp;
         }
         if (renewPa) {
           if (!updated.paStartDate) updated.paStartDate = val;
-          if (!updated.paEndDate) updated.paEndDate = renStr;
+          if (!updated.paEndDate) updated.paEndDate = renStrPa;
         }
       }
 
@@ -745,7 +845,7 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
     });
   };
 
-  const nextRenewal = form.date ? calcInsuranceRenewal(form.date) : null;
+  const nextRenewal = form.date ? calcInsuranceRenewal(form.date, 1) : null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -758,43 +858,125 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
 
     setSaving(true);
     try {
+      let copyOfInsUrl = form.copyOfInsurance;
+      if (form.copyOfInsurance?.url && form.copyOfInsurance.url.startsWith('data:')) {
+        const driveUrl = await uploadFileToDrive(
+          form.copyOfInsurance.url,
+          form.copyOfInsurance.name || `${car.registrationNo || car.vehicleId || 'car'}_Insurance_${Date.now()}`,
+          form.copyOfInsurance.type || 'application/pdf'
+        );
+        if (driveUrl) copyOfInsUrl = driveUrl;
+      } else if (form.copyOfInsurance?.url) {
+        copyOfInsUrl = form.copyOfInsurance.url;
+      }
+
       const nextRenStr = nextRenewal ? toInputDate(nextRenewal) : '';
+
+      // Collect all active end dates to calculate the earliest upcoming renewal
+      const allActiveEnds = [];
+      const finalOdEnd = renewOd ? (form.odEndDate || toInputDate(calcInsuranceRenewal(form.date, 1))) : existingIns?.odEndDate;
+      const finalTpEnd = renewTp ? (form.tpEndDate || toInputDate(calcInsuranceRenewal(form.date, renewTpTenure || 1))) : existingIns?.tpEndDate;
+      const finalPaEnd = renewPa ? (form.paEndDate || toInputDate(calcInsuranceRenewal(form.date, renewPaTenure || 1))) : existingIns?.paEndDate;
+      if (finalOdEnd) allActiveEnds.push(finalOdEnd);
+      if (finalTpEnd) allActiveEnds.push(finalTpEnd);
+      if (finalPaEnd) allActiveEnds.push(finalPaEnd);
+      const earliestMasterRenewal = calcEarliestCoverRenewal(...allActiveEnds) || nextRenStr;
+
+      const finalRenewalId = (renewalId && renewalId.trim()) || nextRenewalId;
+
+      // Net premiums for each cover
+      const currentOdNet = (renewOd && form.hasOwnDamage !== 'No') ? Math.max(0, (Number(form.basicPremium) || 0) + (Number(form.addOnPremium) || 0) - (Number(form.premiumOfNcb) || 0)) : 0;
+      const currentTpNet = (renewTp && form.hasThirdParty !== 'No') ? (Number(form.thirdPartyPremium) || 0) : 0;
+      const currentPaNet = (renewPa && form.hasPaCover !== 'No') ? (Number(form.paPremium) || 0) : 0;
+
+      // ─── 1. Type Of Cover (Own Damage / Self Accident , Third Party (TP) Insurance , Personal Accident (PA Cover)) ───
+      const renewedCoverList = [];
+      if (renewOd) renewedCoverList.push('Own Damage / Self Accident');
+      if (renewTp) renewedCoverList.push('Third Party (TP) Insurance');
+      if (renewPa) renewedCoverList.push('Personal Accident (PA Cover)');
+      const typeOfCover = renewedCoverList.join(', ');
+
+      // ─── 2. Policy End Date (Pichhli/Expiring waali cover ki end date) ───
+      let previousCoverEndDate = '';
+      if (renewOd && existingIns?.odEndDate) previousCoverEndDate = existingIns.odEndDate;
+      else if (renewTp && existingIns?.tpEndDate) previousCoverEndDate = existingIns.tpEndDate;
+      else if (renewPa && existingIns?.paEndDate) previousCoverEndDate = existingIns.paEndDate;
+      else previousCoverEndDate = existingIns?.validityDate || existingIns?.renewalDate || existingIns?.odEndDate || existingIns?.tpEndDate || existingIns?.paEndDate || '';
+
+      // ─── 3. FMS Tracking: Planned & Delay have sheet formulas (do NOT send/overwrite), only Actual gets submission timestamp ───
+      const actualSubmissionTimestamp = createTimestamp();
+
+      // ─── 4. Tax & Totals Breakdown for OD, TP, PA ───
+      const odTax = renewOd ? Math.round(currentOdNet * 0.18) : '';
+      const odTot = renewOd ? (currentOdNet + (odTax || 0)) : '';
+      const tpTax = renewTp ? Math.round(currentTpNet * 0.18) : '';
+      const tpTot = renewTp ? (currentTpNet + (tpTax || 0)) : '';
+      const paTax = renewPa ? Math.round(currentPaNet * 0.18) : '';
+      const paTot = renewPa ? (currentPaNet + (paTax || 0)) : '';
 
       const payload = {
         ...existingIns,
         ...form,
+        copyOfInsurance: copyOfInsUrl,
+        insuranceId: existingIns?.insuranceId || '', // PURE UNCHANGED ORIGINAL INSURANCE ID!
+        renewalId: finalRenewalId,                  // DEDICATED REINS- ID
         vehicleId: car.vehicleId,
         carName: car.carName,
+        registrationNo: car.registrationNo || '',
+
+        // Flags indicating which covers were renewed
+        renewOd: !!renewOd,
+        renewTp: !!renewTp,
+        renewPa: !!renewPa,
+
+        // Previous cover end dates
+        previousOdEndDate: existingIns?.odEndDate || '',
+        previousTpEndDate: existingIns?.tpEndDate || '',
+        previousPaEndDate: existingIns?.paEndDate || '',
+
+        // Sheet Header Specifics
+        typeOfCover,
+        policyEndDate: previousCoverEndDate, // Pichhle waali policy end date!
+        actual: actualSubmissionTimestamp,   // Renewal form submit hone par exact timestamp
+
+        odTaxAmount: odTax,
+        odTotalAmount: odTot,
+        tpTaxAmount: tpTax,
+        tpTotalAmount: tpTot,
+        paTaxAmount: paTax,
+        paTotalAmount: paTot,
 
         // 1. OD Fields
         hasOwnDamage: renewOd ? form.hasOwnDamage : (existingIns?.hasOwnDamage || 'No'),
         odStartDate: renewOd ? form.odStartDate : (existingIns?.odStartDate || ''),
-        odEndDate: renewOd ? (form.odEndDate || nextRenStr) : (existingIns?.odEndDate || ''),
+        odEndDate: renewOd ? (form.odEndDate || toInputDate(calcInsuranceRenewal(form.date, 1))) : (existingIns?.odEndDate || ''),
         basicPremium: renewOd ? form.basicPremium : (existingIns?.basicPremium || ''),
         addOnPremium: renewOd ? form.addOnPremium : (existingIns?.addOnPremium || ''),
         idvValue: renewOd ? form.idvValue : (existingIns?.idvValue || ''),
 
         // 2. TP Fields
         hasThirdParty: renewTp ? form.hasThirdParty : (existingIns?.hasThirdParty || 'No'),
+        tpTenure: renewTp ? (renewTpTenure || '1') : (existingIns?.tpTenure || '1'),
         tpStartDate: renewTp ? form.tpStartDate : (existingIns?.tpStartDate || ''),
-        tpEndDate: renewTp ? (form.tpEndDate || nextRenStr) : (existingIns?.tpEndDate || ''),
+        tpEndDate: renewTp ? (form.tpEndDate || toInputDate(calcInsuranceRenewal(form.date, renewTpTenure || 1))) : (existingIns?.tpEndDate || ''),
         thirdPartyPremium: renewTp ? form.thirdPartyPremium : (existingIns?.thirdPartyPremium || ''),
         tpPolicyNo: renewTp ? form.tpPolicyNo : (existingIns?.tpPolicyNo || ''),
         tppdLimit: renewTp ? form.tppdLimit : (existingIns?.tppdLimit || '750000'),
 
         // 3. PA Fields
         hasPaCover: renewPa ? form.hasPaCover : (existingIns?.hasPaCover || 'No'),
+        paTenure: renewPa ? (renewPaTenure || '1') : (existingIns?.paTenure || '1'),
         paStartDate: renewPa ? form.paStartDate : (existingIns?.paStartDate || ''),
-        paEndDate: renewPa ? (form.paEndDate || nextRenStr) : (existingIns?.paEndDate || ''),
+        paEndDate: renewPa ? (form.paEndDate || toInputDate(calcInsuranceRenewal(form.date, renewPaTenure || 1))) : (existingIns?.paEndDate || ''),
         paPremium: renewPa ? form.paPremium : (existingIns?.paPremium || ''),
 
-        // Master renewal tracking date: set to latest renewed date or earliest upcoming renewal
-        validityDate: renewOd ? (form.odEndDate || nextRenStr) : (renewTp ? (form.tpEndDate || nextRenStr) : nextRenStr),
-        renewalDate: renewOd ? (form.odEndDate || nextRenStr) : (renewTp ? (form.tpEndDate || nextRenStr) : nextRenStr),
+        // Master renewal tracking date: set to earliest upcoming expiration among active covers
+        validityDate: earliestMasterRenewal,
+        renewalDate: earliestMasterRenewal,
       };
 
       await renewInsurance(car.vehicleId, payload);
-      toast.success(`Insurance for ${car.carName} (${car.vehicleId}) renewed successfully!`);
+      toast.success(`Insurance for ${car.carName} renewed! (Renewal ID: ${finalRenewalId})`);
       onSaved();
     } catch (err) {
       toast.error(err.message || 'Renewal update failed');
@@ -817,12 +999,17 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
           <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>{car.carName}</div>
           <div style={{ fontSize: 12.5, color: '#64748b' }}>{car.vehicleId} · {car.registrationNo}</div>
         </div>
-        {existingIns?.renewalDate && (
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 11.5, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>Current Renewal Date</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#ea580c' }}>{formatDate(existingIns.renewalDate)}</div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Permanent Insurance ID</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#1e3a8a', fontFamily: 'monospace' }}>
+            {existingIns?.insuranceId || '—'}
           </div>
-        )}
+          {existingIns?.renewalDate && (
+            <div style={{ fontSize: 12, color: '#ea580c', fontWeight: 600, marginTop: 2 }}>
+              Renewal Due: {formatDate(existingIns.renewalDate)}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main Schedule & Company */}
@@ -831,6 +1018,27 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
         <div className="form-section-title">New Policy Renewal Schedule</div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+        {/* Renewal ID (Reins- Auto Generated - Permanent / Read-Only) */}
+        <div className="form-group">
+          <label className="form-label">Renewal ID <span className="required">*</span></label>
+          <input
+            type="text"
+            className="form-input"
+            value={renewalId}
+            readOnly
+            style={{
+              fontFamily: 'monospace',
+              fontWeight: 800,
+              color: '#047857',
+              letterSpacing: 0.5,
+              background: '#f0fdf4',
+              border: '1.5px solid #a7f3d0',
+              cursor: 'not-allowed',
+              userSelect: 'all'
+            }}
+          />
+        </div>
+
         <div className="form-group">
           <label className="form-label">New Policy Start Date <span className="required">*</span></label>
           <input type="date" className="form-input" value={form.date} onChange={e => set('date', e.target.value)} />
@@ -1012,10 +1220,27 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
           )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
             <div className="form-group">
+              <label className="form-label">TP Renewal Tenure</label>
+              <select
+                className="form-select"
+                value={renewTpTenure}
+                onChange={e => {
+                  const val = e.target.value;
+                  setRenewTpTenure(val);
+                  const s = form.tpStartDate || form.date;
+                  const ren = s ? calcInsuranceRenewal(s, val) : null;
+                  if (ren) set('tpEndDate', toInputDate(ren));
+                }}
+              >
+                <option value="1">1 Year</option>
+                <option value="3">3 Years</option>
+              </select>
+            </div>
+            <div className="form-group">
               <label className="form-label">TP Policy Start Date</label>
               <input type="date" className="form-input" value={form.tpStartDate || ''} onChange={e => {
                 const s = e.target.value;
-                const ren = s ? calcInsuranceRenewal(s) : null;
+                const ren = s ? calcInsuranceRenewal(s, renewTpTenure || 1) : null;
                 set('tpStartDate', s);
                 if (ren) set('tpEndDate', toInputDate(ren));
               }} />
@@ -1093,6 +1318,23 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
               </select>
             </div>
             <div className="form-group">
+              <label className="form-label">PA Renewal Tenure</label>
+              <select
+                className="form-select"
+                value={renewPaTenure}
+                onChange={e => {
+                  const val = e.target.value;
+                  setRenewPaTenure(val);
+                  const s = form.paStartDate || form.date;
+                  const ren = s ? calcInsuranceRenewal(s, val) : null;
+                  if (ren) set('paEndDate', toInputDate(ren));
+                }}
+              >
+                <option value="1">1 Year</option>
+                <option value="3">3 Years</option>
+              </select>
+            </div>
+            <div className="form-group">
               <label className="form-label">PA Sum Insured (₹)</label>
               <input type="number" className="form-input" value={form.paSumInsured} onChange={e => set('paSumInsured', e.target.value)} placeholder="1500000" />
             </div>
@@ -1104,7 +1346,7 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
               <label className="form-label">PA Start Date</label>
               <input type="date" className="form-input" value={form.paStartDate || ''} onChange={e => {
                 const s = e.target.value;
-                const ren = s ? calcInsuranceRenewal(s) : null;
+                const ren = s ? calcInsuranceRenewal(s, renewPaTenure || 1) : null;
                 set('paStartDate', s);
                 if (ren) set('paEndDate', toInputDate(ren));
               }} />
@@ -1166,6 +1408,21 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
         </div>
       </div>
 
+      {/* ─── 5. Copy Of Insurance Upload ─── */}
+      <div className="form-section-header" style={{ marginTop: 24 }}>
+        <div className="form-section-icon"><Upload size={18} strokeWidth={2.2} /></div>
+        <div className="form-section-title">Copy Of Insurance (PDF / Document)</div>
+      </div>
+      <div style={{ marginBottom: 20 }}>
+        <FileUpload
+          id="ins-copy-renew"
+          label="Upload Renewed Copy Of Insurance (PDF or Image)"
+          accept=".pdf,image/*"
+          value={form.copyOfInsurance}
+          onChange={val => set('copyOfInsurance', val)}
+        />
+      </div>
+
       <div className="modal-footer" style={{ padding: '20px 0 0' }}>
         <button type="button" className="btn btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
         <button type="submit" className="btn btn-primary" disabled={saving}>
@@ -1177,10 +1434,18 @@ const RenewalUpdateModal = ({ car, existingIns, onClose, onSaved }) => {
 };
 
 // ─── Details Modal ────────────────────────────────────────────────────────────
-const InsuranceDetails = ({ ins }) => {
+const InsuranceDetails = ({ ins, canEdit = true, onRenew }) => {
   const hasOd = ins.hasOwnDamage === 'Yes' || !!ins.basicPremium;
   const hasTp = ins.hasThirdParty === 'Yes' || !!ins.thirdPartyPremium;
   const hasPa = ins.hasPaCover === 'Yes' || !!ins.paPremium;
+
+  const odEnd = ins.odEndDate || ins.renewalDate || ins.validityDate;
+  const tpEnd = ins.tpEndDate;
+  const paEnd = ins.paEndDate;
+  const allEnds = [odEnd, tpEnd, paEnd].filter(Boolean);
+  const dayCounts = allEnds.map(d => daysUntil(d)).filter(d => d !== null && !isNaN(d));
+  const minDays = dayCounts.length > 0 ? Math.min(...dayCounts) : null;
+  const isDueWithin7Days = minDays !== null && minDays <= 7;
 
   const addOns = [
     ['ZD (Zero Depreciation)', ins.depreciationReimbursement],
@@ -1226,6 +1491,18 @@ const InsuranceDetails = ({ ins }) => {
           <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Insurance Company</div>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{ins.nameOfCompany || '—'}</div>
         </div>
+        {canEdit && onRenew && isDueWithin7Days && (
+          <div>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={onRenew}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, boxShadow: '0 2px 6px rgba(5,150,105,0.25)' }}
+            >
+              <RefreshCw size={13} strokeWidth={2.4} /> Renewal Update
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Active Coverage Type Badges */}
@@ -1383,6 +1660,25 @@ const InsuranceDetails = ({ ins }) => {
         </div>
       </div>
 
+      {ins.copyOfInsurance && (
+        <div style={{ marginTop: 16, marginBottom: 16, padding: '14px 18px', background: '#f0f9ff', borderRadius: 12, border: '1px solid #bae6fd' }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: '#0369a1', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <FileText size={15} /> Copy Of Insurance (Uploaded Document)
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <a
+              href={typeof ins.copyOfInsurance === 'object' ? ins.copyOfInsurance?.url : ins.copyOfInsurance}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-sm btn-outline"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#0284c7', borderColor: '#38bdf8', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
+            >
+              <Eye size={14} /> View / Open Policy PDF / Document
+            </a>
+          </div>
+        </div>
+      )}
+
       {addOns.length > 0 && (
         <div>
           <div className="form-section-header">
@@ -1394,6 +1690,22 @@ const InsuranceDetails = ({ ins }) => {
               <span key={label} className="badge badge-success"><CheckCircle size={12} /> {label}</span>
             ))}
           </div>
+        </div>
+      )}
+
+      {canEdit && onRenew && isDueWithin7Days && (
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ fontSize: 13, color: '#64748b' }}>
+            Policy renewal due within 7 days. Renew this vehicle policy with a new Renewal ID.
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onRenew}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+          >
+            <RefreshCw size={15} strokeWidth={2.4} /> Open Renewal Update
+          </button>
         </div>
       )}
     </div>
@@ -1643,6 +1955,7 @@ const Insurance = () => {
 
                   <th style={{ whiteSpace: 'nowrap' }}>Total Premium</th>
                   <th style={{ whiteSpace: 'nowrap' }}>Status</th>
+                  <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>Copy Of Insurance</th>
                   <th style={{ textAlign: 'center', background: '#ecfdf5', color: '#065f46', borderLeft: '1.5px solid #a7f3d0', whiteSpace: 'nowrap' }}>
                     🔄 Renewal Action
                   </th>
@@ -1745,28 +2058,27 @@ const Insurance = () => {
                         />
                       </td>
 
-                      {/* ─── Renewal Action Column (Direct Update Button) ─── */}
-                      <td style={{ textAlign: 'center', background: isWeekReminder ? '#fef9c3' : '#f0fdf4', borderLeft: '1.5px solid #a7f3d0', whiteSpace: 'nowrap' }}>
+                      <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                        {ins?.copyOfInsurance ? (
+                          <a
+                            href={typeof ins.copyOfInsurance === 'object' ? ins.copyOfInsurance?.url : ins.copyOfInsurance}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-ghost btn-xs"
+                            style={{ color: '#0284c7', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4, background: '#f0f9ff', padding: '3px 8px', borderRadius: 6, border: '1px solid #bae6fd' }}
+                            title="Open Copy Of Insurance (PDF)"
+                          >
+                            <FileText size={13} /> PDF
+                          </a>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
+                        )}
+                      </td>
+
+                      {/* ─── Renewal Action Column (Only within 7 Days of End Date or Expired) ─── */}
+                      <td style={{ textAlign: 'center', background: (isWeekReminder || isExpired) ? (isExpired ? '#fee2e2' : '#fef9c3') : undefined, borderLeft: '1.5px solid #a7f3d0', whiteSpace: 'nowrap' }}>
                         {canEdit ? (
-                          ins ? (
-                            <button
-                              onClick={() => setRenewalModalCar(car)}
-                              style={{
-                                display: 'inline-flex', alignItems: 'center', gap: 5,
-                                padding: isWeekReminder || isExpired ? '6px 12px' : '5px 10px',
-                                borderRadius: 10, fontSize: 12, fontWeight: 700,
-                                cursor: 'pointer', transition: 'all 0.18s',
-                                background: isWeekReminder || isExpired ? '#059669' : '#ffffff',
-                                color: isWeekReminder || isExpired ? '#ffffff' : '#059669',
-                                border: '1.5px solid #059669',
-                                boxShadow: isWeekReminder ? '0 2px 8px rgba(5,150,105,0.3)' : 'none'
-                              }}
-                              title="Click to update insurance renewal"
-                            >
-                              <RefreshCw size={13} strokeWidth={2.4} />
-                              <span>{isWeekReminder || isExpired ? 'Renewal Update' : 'Renew Policy'}</span>
-                            </button>
-                          ) : (
+                          !ins ? (
                             <button
                               onClick={() => setAddModal(true)}
                               className="btn btn-xs btn-outline"
@@ -1774,6 +2086,26 @@ const Insurance = () => {
                             >
                               + Add Policy
                             </button>
+                          ) : (isWeekReminder || isExpired) ? (
+                            <button
+                              onClick={() => setRenewalModalCar(car)}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                padding: '5px 12px',
+                                borderRadius: 10, fontSize: 12, fontWeight: 700,
+                                cursor: 'pointer', transition: 'all 0.18s ease',
+                                background: isExpired ? '#fef2f2' : '#ffffff',
+                                color: isExpired ? '#dc2626' : '#059669',
+                                border: `1.5px solid ${isExpired ? '#ef4444' : '#10b981'}`,
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                              }}
+                              title={isExpired ? 'Policy expired! Click to renew' : `Due in ${days} days! Click to renew`}
+                            >
+                              <RefreshCw size={13} strokeWidth={2.4} />
+                              <span>Renew Policy</span>
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500 }}>—</span>
                           )
                         ) : (
                           <span style={{ fontSize: 11.5, color: '#94a3b8', fontWeight: 600 }}>
@@ -1820,6 +2152,7 @@ const Insurance = () => {
           <RenewalUpdateModal
             car={renewalModalCar}
             existingIns={insMap[renewalModalCar.vehicleId]}
+            allInsurance={insurance}
             onClose={() => setRenewalModalCar(null)}
             onSaved={() => { setRenewalModalCar(null); load(); }}
           />
@@ -1829,7 +2162,19 @@ const Insurance = () => {
       {/* Details Modal */}
       <Modal isOpen={!!detailModal} onClose={() => setDetailModal(null)}
         title={`Insurance Details — ${detailModal?.carName}`} icon={Shield} size="lg">
-        {detailModal && <InsuranceDetails ins={detailModal} />}
+        {detailModal && (
+          <InsuranceDetails
+            ins={detailModal}
+            canEdit={canEdit}
+            onRenew={() => {
+              const car = cars.find(c => c.vehicleId === detailModal.vehicleId || c.carName === detailModal.carName);
+              if (car) {
+                setDetailModal(null);
+                setRenewalModalCar(car);
+              }
+            }}
+          />
+        )}
       </Modal>
     </div>
   );

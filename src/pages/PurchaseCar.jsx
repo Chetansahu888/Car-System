@@ -4,7 +4,7 @@ import { Car, Plus, Search, Edit2, Trash2, Eye, X, Filter, CreditCard, User, Use
 import toast from 'react-hot-toast';
 import { getCars, addCar, updateCar, deleteCar, getInsurance, renewInsurance, syncEmiToSheet, getMasterFirmNames, getMasterEmployees, onStoreUpdate, checkHasEmi } from '../store/dataStore';
 import { generateVehicleId, generateEmiNo, generateInsuranceId } from '../utils/idGenerator';
-import { formatDate, today, calcInsuranceRenewal, toInputDate, calcEmiDetails } from '../utils/dateUtils';
+import { formatDate, today, calcInsuranceRenewal, calcEarliestCoverRenewal, toInputDate, calcEmiDetails } from '../utils/dateUtils';
 import { validateForm, required, phone, positiveNumber } from '../utils/validators';
 import { FUEL_TYPES, ITEMS_PER_PAGE } from '../constants';
 import { uploadFileToDrive } from '../api/googleSheetsClient';
@@ -47,14 +47,17 @@ const EMPTY_INSURANCE = {
   nameOfCompany: '',
   agentName: '',
   hasOwnDamage: 'Yes',
+  odTenure: '1',
   odStartDate: '',
   odEndDate: '',
   hasThirdParty: 'Yes',
+  tpTenure: '3',
   tpPolicyNo: '',
   tpStartDate: '',
   tpEndDate: '',
   tppdLimit: '750000',
   hasPaCover: 'Yes',
+  paTenure: '1',
   paCoverType: 'Owner-Driver CPA (₹15 Lakhs)',
   paSumInsured: '1500000',
   paPremium: '',
@@ -683,14 +686,20 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
         const allIns = await getInsurance();
         const existingIns = allIns.find(i => (finalVehicleId && i.vehicleId === finalVehicleId) || (insForm.insuranceId && i.insuranceId === insForm.insuranceId));
         const insuranceId = existingIns?.insuranceId || insForm.insuranceId || generateInsuranceId(allIns);
-        const renewal = calcInsuranceRenewal(insForm.date);
+        const renewal = calcInsuranceRenewal(insForm.date, 1);
+        const activeEnds = [];
+        if (insForm.hasOwnDamage === 'Yes' && insForm.odEndDate) activeEnds.push(insForm.odEndDate);
+        if (insForm.hasThirdParty === 'Yes' && insForm.tpEndDate) activeEnds.push(insForm.tpEndDate);
+        if (insForm.hasPaCover === 'Yes' && insForm.paEndDate) activeEnds.push(insForm.paEndDate);
+        const earliest = calcEarliestCoverRenewal(...activeEnds) || (renewal ? toInputDate(renewal) : '');
         await renewInsurance(finalVehicleId, {
           ...insForm,
           insuranceId,
           vehicleId: finalVehicleId,
           carName: processedForm.carName,
-          validityDate: renewal ? toInputDate(renewal) : '',
-          renewalDate: renewal ? toInputDate(renewal) : '',
+          copyOfInsurance: processedForm.copyOfInsurance,
+          validityDate: earliest,
+          renewalDate: earliest,
           timestamp: new Date().toISOString(),
         });
         toast.success(`Insurance record (${insuranceId}) saved to Insurance Of Vehicle sheet`);
@@ -1102,13 +1111,27 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                   value={insForm.date}
                   onChange={e => {
                     const val = e.target.value;
-                    setInsForm(f => ({ ...f, date: val }));
+                    setInsForm(f => {
+                      const updated = { ...f, date: val };
+                      if (val) {
+                        const odRen = calcInsuranceRenewal(val, 1);
+                        const tpRen = calcInsuranceRenewal(val, f.tpTenure || 3);
+                        const paRen = calcInsuranceRenewal(val, f.paTenure || 1);
+                        if (!f.odStartDate) updated.odStartDate = val;
+                        updated.odEndDate = odRen ? toInputDate(odRen) : updated.odEndDate;
+                        if (!f.tpStartDate) updated.tpStartDate = val;
+                        updated.tpEndDate = tpRen ? toInputDate(tpRen) : updated.tpEndDate;
+                        if (!f.paStartDate) updated.paStartDate = val;
+                        updated.paEndDate = paRen ? toInputDate(paRen) : updated.paEndDate;
+                      }
+                      return updated;
+                    });
                     set('dateOfInsurance', val);
                   }}
                 />
                 {insRenewal && (
                   <div style={{ fontSize: 12, color: '#059669', fontWeight: 600, marginTop: 4 }}>
-                    ✓ Next Renewal: {formatDate(insRenewal)} (1 year − 1 day)
+                    ✓ Next Renewal: {formatDate(insRenewal)}
                   </div>
                 )}
               </FormField>
@@ -1182,7 +1205,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                       value={insForm.odStartDate || ''}
                       onChange={e => {
                         const sDate = e.target.value;
-                        const ren = sDate ? calcInsuranceRenewal(sDate) : null;
+                        const ren = sDate ? calcInsuranceRenewal(sDate, 1) : null;
                         updateIns('odStartDate', sDate);
                         if (ren) updateIns('odEndDate', toInputDate(ren));
                       }}
@@ -1307,7 +1330,28 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                   <div className="form-section-icon"><Shield size={18} strokeWidth={2.2} /></div>
                   <div className="form-section-title">Third Party (TP) Insurance Details</div>
                 </div>
+
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
+                  <FormField label="TP Policy Tenure" required>
+                    <select
+                      className="form-select"
+                      value={insForm.tpTenure || '3'}
+                      onChange={e => {
+                        const tenure = e.target.value;
+                        const sDate = insForm.tpStartDate || insForm.date;
+                        const ren = sDate ? calcInsuranceRenewal(sDate, tenure) : null;
+                        setInsForm(f => ({
+                          ...f,
+                          tpTenure: tenure,
+                          tpEndDate: ren ? toInputDate(ren) : f.tpEndDate
+                        }));
+                      }}
+                    >
+                      <option value="3">3 Years</option>
+                      <option value="1">1 Year</option>
+                    </select>
+                  </FormField>
+
                   <FormField label="TP Policy Start Date">
                     <input
                       type="date"
@@ -1315,7 +1359,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                       value={insForm.tpStartDate || ''}
                       onChange={e => {
                         const sDate = e.target.value;
-                        const ren = sDate ? calcInsuranceRenewal(sDate) : null;
+                        const ren = sDate ? calcInsuranceRenewal(sDate, insForm.tpTenure || 3) : null;
                         updateIns('tpStartDate', sDate);
                         if (ren) updateIns('tpEndDate', toInputDate(ren));
                       }}
@@ -1378,6 +1422,25 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                       <option value="Unnamed Passenger Cover">Unnamed Passenger Cover</option>
                     </select>
                   </FormField>
+                  <FormField label="PA Cover Tenure">
+                    <select
+                      className="form-select"
+                      value={insForm.paTenure || '1'}
+                      onChange={e => {
+                        const tenure = e.target.value;
+                        const sDate = insForm.paStartDate || insForm.date;
+                        const ren = sDate ? calcInsuranceRenewal(sDate, tenure) : null;
+                        setInsForm(f => ({
+                          ...f,
+                          paTenure: tenure,
+                          paEndDate: ren ? toInputDate(ren) : f.paEndDate
+                        }));
+                      }}
+                    >
+                      <option value="1">1 Year</option>
+                      <option value="3">3 Years</option>
+                    </select>
+                  </FormField>
                   <FormField label="PA Sum Insured (₹)">
                     <input
                       type="number"
@@ -1403,7 +1466,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                       value={insForm.paStartDate || ''}
                       onChange={e => {
                         const sDate = e.target.value;
-                        const ren = sDate ? calcInsuranceRenewal(sDate) : null;
+                        const ren = sDate ? calcInsuranceRenewal(sDate, insForm.paTenure || 1) : null;
                         updateIns('paStartDate', sDate);
                         if (ren) updateIns('paEndDate', toInputDate(ren));
                       }}

@@ -3,7 +3,7 @@
 
 import { getScriptUrl, fetchFromSheet, sendToSheet } from '../api/googleSheetsClient';
 import { createTimestamp, today, calculateExpectedSettlementDate, calcEmiDetails } from '../utils/dateUtils';
-import { generateClaimNo, generateId, generateEmiNo, generateInsuranceId } from '../utils/idGenerator';
+import { generateClaimNo, generateId, generateEmiNo, generateInsuranceId, generateRenewalId } from '../utils/idGenerator';
 
 const KEYS = {
   CARS: 'cms_cars',
@@ -17,6 +17,7 @@ const KEYS = {
   CHALLANS: 'cms_challans',
   FASTAGS: 'cms_fastags',
   USERS: 'cms_users',
+  RENEWALS: 'cms_insurance_renewals',
 };
 
 export const PAGE_STEPS = [
@@ -355,11 +356,21 @@ export const checkHasEmi = (car) => {
   return false;
 };
 
-// ─── MAPPER FOR "Insurance Of Vehicle" SHEET (EXACT 41 COLUMNS) ────────────────
+// ─── MAPPER FOR "Insurance Of Vehicle" SHEET (EXACT 43 COLUMNS) ────────────────
 export const mapInsuranceToSheet = (ins, existingList = []) => {
   const boolToYesNo = (val) => {
     if (val === true || val === 'Yes' || val === 'yes' || val === 'TRUE' || val === 1 || val === '1') return 'Yes';
     return 'No';
+  };
+
+  const formatTenure = (val, defaultVal = '1 Year') => {
+    if (!val && val !== 0) return defaultVal;
+    const s = String(val).trim().toLowerCase();
+    if (s.startsWith('3')) return '3 Years';
+    if (s.startsWith('1')) return '1 Year';
+    if (s.startsWith('2')) return '2 Years';
+    if (s.startsWith('5')) return '5 Years';
+    return String(val).trim();
   };
 
   const insuranceId = ins.insuranceId || generateInsuranceId(existingList);
@@ -372,7 +383,7 @@ export const mapInsuranceToSheet = (ins, existingList = []) => {
     "Car Name": ins.carName || '',
     "Name Of Company": ins.nameOfCompany || '',
     "Date Of Insurance": ins.dateOfInsurance || ins.date || '',
-    "Own Damage / Self Accident Details": ins.hasOwnDamage || (ins.basicPremium ? 'Yes' : 'No'),
+    "Own Damage / Self Accident": ins.hasOwnDamage || (ins.basicPremium ? 'Yes' : 'No'),
     "OD Policy Start Date": ins.odStartDate || ins.date || '',
     "OD Policy End Date": ins.odEndDate || '',
     "IDV Value (₹)": ins.idvValue || '',
@@ -389,14 +400,16 @@ export const mapInsuranceToSheet = (ins, existingList = []) => {
     "KP (Key Protect) ": boolToYesNo(ins.keyReplacement || ins.kp),
     "Emergency Transport And Hotel": boolToYesNo(ins.emergencyTransportHotel || ins.emergencyTransportAndHotel),
     "RTI (Return to Invoice)": boolToYesNo(ins.returnToInvoice || ins.rti),
-    "Third Party (TP) Insurance Details": ins.hasThirdParty || (ins.thirdPartyPremium ? 'Yes' : 'No'),
+    "Third Party (TP) Insurance": ins.hasThirdParty || (ins.thirdPartyPremium ? 'Yes' : 'No'),
+    "TP Policy Tenure": formatTenure(ins.tpTenure || ins.tpPolicyTenure, '3 Years'),
     "TP Policy Start Date": ins.tpStartDate || ins.date || '',
     "TP Policy End Date": ins.tpEndDate || '',
     "3rd Party Premium (₹)": ins.thirdPartyPremium || '',
     "TP Policy / Certificate No.": ins.tpPolicyNo || '',
     "TPPD Coverage Limit (₹)": ins.tppdLimit || '750000',
-    "Personal Accident (PA) Cover Details": ins.hasPaCover || (ins.paPremium ? 'Yes' : 'No'),
+    "Personal Accident (PA) Cover": ins.hasPaCover || (ins.paPremium ? 'Yes' : 'No'),
     "PA Cover Type": ins.paCoverType || 'Owner-Driver CPA (₹15 Lakhs)',
+    "PA Cover Tenure": formatTenure(ins.paTenure || ins.paCoverTenure, '1 Year'),
     "PA Sum Insured (₹)": ins.paSumInsured || '1500000',
     "PA Premium (₹)": ins.paPremium || '',
     "PA Start Date": ins.paStartDate || ins.date || '',
@@ -407,6 +420,220 @@ export const mapInsuranceToSheet = (ins, existingList = []) => {
     "Total Premium Amount (₹)": ins.totalPremiumAmount || ins.totalPremiumToBePaid || '',
     "Copy Of Insurance": ins.copyOfInsurance?.url || (typeof ins.copyOfInsurance === 'string' ? ins.copyOfInsurance : '') || '',
   };
+};
+
+export const mapInsuranceRenewalToSheet = (rec) => {
+  const boolToYesNo = (v) => {
+    if (v === true || v === 'Yes' || v === 'yes' || v === 'true' || v === 1 || v === '1') return 'Yes';
+    if (v === false || v === 'No' || v === 'no' || v === 'false' || v === 0 || v === '0') return 'No';
+    return '';
+  };
+
+  const formatTenure = (val, defaultVal = '1 Year') => {
+    if (!val) return defaultVal;
+    const s = String(val).trim();
+    if (s.toLowerCase().includes('year')) return s;
+    if (s === '1') return '1 Year';
+    if (s === '2') return '2 Years';
+    if (s === '3') return '3 Years';
+    if (s === '5') return '5 Years';
+    return `${s} Year${Number(s) > 1 ? 's' : ''}`;
+  };
+
+  return {
+    "Timestamps": rec.timestamp || rec.updatedAt || createTimestamp(),
+    "Renewal Insurance ID": rec.renewalId || '',
+    "Vehicle ID": rec.vehicleId || '',
+    "Insurance ID": rec.insuranceId || '',
+    "Car Name": rec.carName || '',
+    "Reg. No.": rec.registrationNo || '',
+    "Insurance Company": rec.nameOfCompany || '',
+    "Insurance Agent / Broker": rec.agentName || '',
+    "Type Of Cover": rec.typeOfCover || '',
+    "Policy End Date": rec.policyEndDate || '',
+    "Actual": rec.actual || createTimestamp(),
+
+    // OD Group
+    "OD Policy Start Date": rec.odStartDate || '',
+    "OD Policy End Date": rec.odEndDate || '',
+    "Renewed IDV Value (₹)": rec.idvValue || '',
+    "Own Damage / Basic Premium (₹)": rec.basicPremium || '',
+    "Claimed Insurance Last Year?": rec.claimedLastYear || 'No',
+    "Policy Inclusive of NCB?": rec.policyInclusiveOfNcb || 'No',
+    "NCB Discount Amount (₹)": rec.premiumOfNcb || '',
+    "Cashless Facility Available?": rec.cashlessPolicy || 'Yes',
+    "ZD (Zero Depreciation)": boolToYesNo(rec.depreciationReimbursement || rec.zd),
+    "EP (Engine Protect)": boolToYesNo(rec.engineSecure || rec.ep),
+    "CM (Consumable Expenses)": boolToYesNo(rec.consumableExpenses || rec.cm),
+    "PB (Loss of Personal Belonging)": boolToYesNo(rec.personalBelonging || rec.pb),
+    "Roadside Assistance (RSA)": boolToYesNo(rec.roadsideAssistance || rec.rsa),
+    "KP (Key Protect) ": boolToYesNo(rec.keyReplacement || rec.kp),
+    "Emergency Transport And Hotel": boolToYesNo(rec.emergencyTransportHotel),
+    "RTI (Return to Invoice)": boolToYesNo(rec.returnToInvoice || rec.rti),
+    "odTaxAmount": rec.odTaxAmount !== undefined ? rec.odTaxAmount : '',
+    "odTotalAmount": rec.odTotalAmount !== undefined ? rec.odTotalAmount : '',
+
+    // TP Group
+    "TP Policy Start Date": rec.tpStartDate || '',
+    "TP Policy End Date": rec.tpEndDate || '',
+    "TP Policy Tenure": formatTenure(rec.tpTenure || rec.tpPolicyTenure, '1 Year'),
+    "3rd Party Premium (₹)": rec.thirdPartyPremium || '',
+    "TP Policy / Certificate No.": rec.tpPolicyNo || '',
+    "TPPD Coverage Limit (₹)": rec.tppdLimit || '750000',
+    "tpTaxAmount": rec.tpTaxAmount !== undefined ? rec.tpTaxAmount : '',
+    "tpTotalAmount": rec.tpTotalAmount !== undefined ? rec.tpTotalAmount : '',
+
+    // PA Group
+    "PA Cover Type": rec.paCoverType || '',
+    "PA Sum Insured (₹)": rec.paSumInsured || '1500000',
+    "PA Premium (₹)": rec.paPremium || '',
+    "PA Start Date": rec.paStartDate || '',
+    "PA End Date": rec.paEndDate || '',
+    "PA Cover Tenure": formatTenure(rec.paTenure || rec.paCoverTenure, '1 Year'),
+    "Nominee Name": rec.paNomineeName || rec.nomineeName || '',
+    "Nominee Relationship": rec.paNomineeRelation || rec.nomineeRelationship || '',
+    "paTaxAmount": rec.paTaxAmount !== undefined ? rec.paTaxAmount : '',
+    "paTotalAmount": rec.paTotalAmount !== undefined ? rec.paTotalAmount : '',
+
+    // Fallbacks
+    "Tax / GST (18%) (₹)": rec.taxAmount || '',
+    "Total Premium Amount (₹)": rec.totalPremiumAmount || rec.totalPremiumToBePaid || '',
+  };
+};
+
+export const mapInsuranceRenewalRows = (rec) => {
+  const boolToYesNo = (v) => {
+    if (v === true || v === 'Yes' || v === 'yes' || v === 'true' || v === 1 || v === '1') return 'Yes';
+    if (v === false || v === 'No' || v === 'no' || v === 'false' || v === 0 || v === '0') return 'No';
+    return '';
+  };
+
+  const formatTenure = (val, defaultVal = '1 Year') => {
+    if (!val) return defaultVal;
+    const s = String(val).trim();
+    if (s.toLowerCase().includes('year')) return s;
+    if (s === '1') return '1 Year';
+    if (s === '2') return '2 Years';
+    if (s === '3') return '3 Years';
+    if (s === '5') return '5 Years';
+    return `${s} Year${Number(s) > 1 ? 's' : ''}`;
+  };
+
+  const rows = [];
+  const baseTimestamp = rec.actual || rec.timestamp || rec.updatedAt || createTimestamp();
+  const renewalId = rec.renewalId || '';
+  const vehicleId = rec.vehicleId || '';
+  const insuranceId = rec.insuranceId || '';
+  const carName = rec.carName || '';
+  const regNo = rec.registrationNo || '';
+  const comp = rec.nameOfCompany || '';
+  const agent = rec.agentName || '';
+
+  // 1. OD Row (if Own Damage renewed)
+  if (rec.renewOd) {
+    rows.push({
+      "Timestamps": baseTimestamp,
+      "Renewal Insurance ID": renewalId,
+      "Vehicle ID": vehicleId,
+      "Insurance ID": insuranceId,
+      "Car Name": carName,
+      "Reg. No.": regNo,
+      "Insurance Company": comp,
+      "Insurance Agent / Broker": agent,
+      "Type Of Cover": "Own Damage / Self Accident",
+      "Policy End Date": rec.previousOdEndDate || rec.existingOdEndDate || '',
+      "Actual": baseTimestamp,
+
+      // OD Group
+      "OD Policy Start Date": rec.odStartDate || '',
+      "OD Policy End Date": rec.odEndDate || '',
+      "Renewed IDV Value (₹)": rec.idvValue || '',
+      "Own Damage / Basic Premium (₹)": rec.basicPremium || '',
+      "Claimed Insurance Last Year?": rec.claimedLastYear || 'No',
+      "Policy Inclusive of NCB?": rec.policyInclusiveOfNcb || 'No',
+      "NCB Discount Amount (₹)": rec.premiumOfNcb || '',
+      "Cashless Facility Available?": rec.cashlessPolicy || 'Yes',
+      "ZD (Zero Depreciation)": boolToYesNo(rec.depreciationReimbursement || rec.zd),
+      "EP (Engine Protect)": boolToYesNo(rec.engineSecure || rec.ep),
+      "CM (Consumable Expenses)": boolToYesNo(rec.consumableExpenses || rec.cm),
+      "PB (Loss of Personal Belonging)": boolToYesNo(rec.personalBelonging || rec.pb),
+      "Roadside Assistance (RSA)": boolToYesNo(rec.roadsideAssistance || rec.rsa),
+      "KP (Key Protect) ": boolToYesNo(rec.keyReplacement || rec.kp),
+      "Emergency Transport And Hotel": boolToYesNo(rec.emergencyTransportHotel),
+      "RTI (Return to Invoice)": boolToYesNo(rec.returnToInvoice || rec.rti),
+      "odTaxAmount": rec.odTaxAmount !== undefined ? rec.odTaxAmount : '',
+      "odTotalAmount": rec.odTotalAmount !== undefined ? rec.odTotalAmount : '',
+      "Tax / GST (18%) (₹)": rec.odTaxAmount !== undefined ? rec.odTaxAmount : '',
+      "Total Premium Amount (₹)": rec.odTotalAmount !== undefined ? rec.odTotalAmount : '',
+    });
+  }
+
+  // 2. TP Row (if Third Party renewed)
+  if (rec.renewTp) {
+    rows.push({
+      "Timestamps": baseTimestamp,
+      "Renewal Insurance ID": renewalId,
+      "Vehicle ID": vehicleId,
+      "Insurance ID": insuranceId,
+      "Car Name": carName,
+      "Reg. No.": regNo,
+      "Insurance Company": comp,
+      "Insurance Agent / Broker": agent,
+      "Type Of Cover": "Third Party (TP) Insurance",
+      "Policy End Date": rec.previousTpEndDate || rec.existingTpEndDate || '',
+      "Actual": baseTimestamp,
+
+      // TP Group
+      "TP Policy Start Date": rec.tpStartDate || '',
+      "TP Policy End Date": rec.tpEndDate || '',
+      "TP Policy Tenure": formatTenure(rec.tpTenure || rec.tpPolicyTenure, '1 Year'),
+      "3rd Party Premium (₹)": rec.thirdPartyPremium || '',
+      "TP Policy / Certificate No.": rec.tpPolicyNo || '',
+      "TPPD Coverage Limit (₹)": rec.tppdLimit || '750000',
+      "tpTaxAmount": rec.tpTaxAmount !== undefined ? rec.tpTaxAmount : '',
+      "tpTotalAmount": rec.tpTotalAmount !== undefined ? rec.tpTotalAmount : '',
+      "Tax / GST (18%) (₹)": rec.tpTaxAmount !== undefined ? rec.tpTaxAmount : '',
+      "Total Premium Amount (₹)": rec.tpTotalAmount !== undefined ? rec.tpTotalAmount : '',
+    });
+  }
+
+  // 3. PA Row (if Personal Accident renewed)
+  if (rec.renewPa) {
+    rows.push({
+      "Timestamps": baseTimestamp,
+      "Renewal Insurance ID": renewalId,
+      "Vehicle ID": vehicleId,
+      "Insurance ID": insuranceId,
+      "Car Name": carName,
+      "Reg. No.": regNo,
+      "Insurance Company": comp,
+      "Insurance Agent / Broker": agent,
+      "Type Of Cover": "Personal Accident (PA Cover)",
+      "Policy End Date": rec.previousPaEndDate || rec.existingPaEndDate || '',
+      "Actual": baseTimestamp,
+
+      // PA Group
+      "PA Cover Type": rec.paCoverType || '',
+      "PA Sum Insured (₹)": rec.paSumInsured || '1500000',
+      "PA Premium (₹)": rec.paPremium || '',
+      "PA Start Date": rec.paStartDate || '',
+      "PA End Date": rec.paEndDate || '',
+      "PA Cover Tenure": formatTenure(rec.paTenure || rec.paCoverTenure, '1 Year'),
+      "Nominee Name": rec.paNomineeName || rec.nomineeName || '',
+      "Nominee Relationship": rec.paNomineeRelation || rec.nomineeRelationship || '',
+      "paTaxAmount": rec.paTaxAmount !== undefined ? rec.paTaxAmount : '',
+      "paTotalAmount": rec.paTotalAmount !== undefined ? rec.paTotalAmount : '',
+      "Tax / GST (18%) (₹)": rec.paTaxAmount !== undefined ? rec.paTaxAmount : '',
+      "Total Premium Amount (₹)": rec.paTotalAmount !== undefined ? rec.paTotalAmount : '',
+    });
+  }
+
+  // If neither flag was explicitly passed, fallback to single row
+  if (rows.length === 0) {
+    rows.push(mapInsuranceRenewalToSheet(rec));
+  }
+
+  return rows;
 };
 
 export const mapSheetRowToInsurance = (row, index) => {
@@ -437,7 +664,15 @@ export const mapSheetRowToInsurance = (row, index) => {
     return s === 'yes' || s === 'true' || s === '1';
   };
 
+  const parseTenureYears = (val, defaultYears = 1) => {
+    if (!val) return String(defaultYears);
+    const m = String(val).match(/\d+/);
+    return m ? m[0] : String(defaultYears);
+  };
+
   const insId = get('Insurance ID', 'Insurance Id', 'insuranceId') || `INS-${String(index + 1).padStart(4, '0')}`;
+  const rawTpTenure = get('TP Policy Tenure', 'tpPolicyTenure', 'tpTenure', 'TP Tenure');
+  const rawPaTenure = get('PA Cover Tenure', 'paCoverTenure', 'paTenure', 'PA Tenure');
 
   return {
     id: row.id || `ins_${index + 1}`,
@@ -462,17 +697,21 @@ export const mapSheetRowToInsurance = (row, index) => {
     keyReplacement: isYes(get('KP (Key Protect)', 'KP (Key Protect) ', 'Key Replacement', 'KP', 'kp')),
     emergencyTransportHotel: isYes(get('Emergency Transport And Hotel', 'Emergency Transport & Hotel', 'emergencyTransportHotel')),
     returnToInvoice: isYes(get('RTI (Return to Invoice)', 'Return To Invoice', 'RTI', 'rti')),
-    hasOwnDamage: get('Own Damage / Self Accident Details', 'Own Damage / Self Accident', 'hasOwnDamage') || (get('Own Damage / Basic Premium (₹)', 'Basic Premium') ? 'Yes' : 'No'),
+    hasOwnDamage: get('Own Damage / Self Accident', 'Own Damage / Self Accident Details', 'hasOwnDamage') || (get('Own Damage / Basic Premium (₹)', 'Basic Premium') ? 'Yes' : 'No'),
     odStartDate: get('OD Policy Start Date', 'OD Start Date', 'odStartDate') || date,
     odEndDate: get('OD Policy End Date', 'OD End Date', 'odEndDate'),
-    hasThirdParty: get('Third Party (TP) Insurance Details', 'Third Party Insurance', 'hasThirdParty') || (get('3rd Party Premium (₹)', 'Third Party Premium') ? 'Yes' : 'No'),
+    hasThirdParty: get('Third Party (TP) Insurance', 'Third Party (TP) Insurance Details', 'Third Party Insurance', 'hasThirdParty') || (get('3rd Party Premium (₹)', 'Third Party Premium') ? 'Yes' : 'No'),
+    tpTenure: parseTenureYears(rawTpTenure, 3),
+    tpPolicyTenure: rawTpTenure || '3 Years',
     tpStartDate: get('TP Policy Start Date', 'TP Start Date', 'tpStartDate') || date,
     tpEndDate: get('TP Policy End Date', 'TP End Date', 'tpEndDate'),
     thirdPartyPremium: get('3rd Party Premium (₹)', 'Third Party Premium', 'thirdPartyPremium'),
     tpPolicyNo: get('TP Policy / Certificate No.', 'TP Policy No', 'tpPolicyNo'),
     tppdLimit: get('TPPD Coverage Limit (₹)', 'TPPD Limit', 'tppdLimit') || '750000',
-    hasPaCover: get('Personal Accident (PA) Cover Details', 'Personal Accident Cover', 'hasPaCover') || (get('PA Premium (₹)', 'PA Premium') ? 'Yes' : 'No'),
+    hasPaCover: get('Personal Accident (PA) Cover', 'Personal Accident (PA) Cover Details', 'Personal Accident Cover', 'hasPaCover') || (get('PA Premium (₹)', 'PA Premium') ? 'Yes' : 'No'),
     paCoverType: get('PA Cover Type', 'paCoverType') || 'Owner-Driver CPA (₹15 Lakhs)',
+    paTenure: parseTenureYears(rawPaTenure, 1),
+    paCoverTenure: rawPaTenure || '1 Year',
     paSumInsured: get('PA Sum Insured (₹)', 'PA Sum Insured', 'paSumInsured') || '1500000',
     paPremium: get('PA Premium (₹)', 'PA Premium', 'paPremium'),
     paStartDate: get('PA Start Date', 'paStartDate') || date,
@@ -1514,11 +1753,18 @@ export const renewInsurance = async (vehicleId, renewalData) => {
   const all = load(KEYS.INSURANCE);
   const idx = all.findIndex(i => (vehicleId && i.vehicleId === vehicleId) || (renewalData.insuranceId && i.insuranceId === renewalData.insuranceId) || (renewalData.carName && i.carName === renewalData.carName));
   const now = createTimestamp();
-  const insuranceId = (idx !== -1 && all[idx].insuranceId) ? all[idx].insuranceId : (renewalData.insuranceId || generateInsuranceId(all));
+  
+  // 1. Keep original Insurance ID intact and untouched!
+  const originalInsuranceId = (idx !== -1 && all[idx].insuranceId) ? all[idx].insuranceId : (renewalData.insuranceId || generateInsuranceId(all));
+  
+  // 2. Renewal ID with "REINS-" prefix
+  const renewalId = renewalData.renewalId || generateRenewalId(all);
+  
   const updatedRecord = {
     ...(idx !== -1 ? all[idx] : {}),
     ...renewalData,
-    insuranceId,
+    insuranceId: originalInsuranceId, // Untouched original ID!
+    renewalId: renewalId,             // REINS-0001
     vehicleId: vehicleId || (idx !== -1 ? all[idx].vehicleId : ''),
     timestamp: now,
     updatedAt: now,
@@ -1526,8 +1772,8 @@ export const renewInsurance = async (vehicleId, renewalData) => {
   
   if (idx !== -1) {
     all[idx] = updatedRecord;
-    const keyField = updatedRecord.insuranceId ? 'Insurance ID' : (updatedRecord.vehicleId ? 'Vehicle ID' : 'Car Name');
-    const keyValue = updatedRecord.insuranceId || updatedRecord.vehicleId || updatedRecord.carName;
+    const keyField = updatedRecord.vehicleId ? 'Vehicle ID' : (originalInsuranceId ? 'Insurance ID' : 'Car Name');
+    const keyValue = updatedRecord.vehicleId || originalInsuranceId || updatedRecord.carName;
     sendToSheet({ action: 'update', sheetName: 'Insurance Of Vehicle', keyField, keyValue, data: mapInsuranceToSheet(updatedRecord, all) });
   } else {
     const newId = `ins_${Date.now()}`;
@@ -1536,6 +1782,17 @@ export const renewInsurance = async (vehicleId, renewalData) => {
     sendToSheet({ action: 'add', sheetName: 'Insurance Of Vehicle', data: mapInsuranceToSheet(newRecord, all) });
   }
   save(KEYS.INSURANCE, all);
+  
+  // 3. Save to local renewals history and sync each renewed cover row to Google Sheets "Insurance Renewal"
+  try {
+    const renewals = load(KEYS.RENEWALS);
+    const renewalRows = mapInsuranceRenewalRows(updatedRecord);
+    renewalRows.forEach(r => renewals.push({ ...r, id: `ren_${Date.now()}_${Math.random().toString(36).substr(2, 4)}` }));
+    save(KEYS.RENEWALS, renewals);
+    sendToSheet({ action: 'add', sheetName: 'Insurance Renewal', data: renewalRows });
+  } catch (err) {
+    console.error('Failed to log to Insurance Renewal sheet:', err);
+  }
   
   // Also update vehicle's master dateOfInsurance & Insurance of Vehicle = Yes
   const cars = load(KEYS.CARS);

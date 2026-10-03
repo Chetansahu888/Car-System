@@ -10,7 +10,12 @@ export const compressImage = (file, maxWidth = 1400, maxHeight = 1400, quality =
     // If it's a PDF or not an image, return original
     if (!file.type.startsWith('image/')) {
       const reader = new FileReader();
-      reader.onload = (e) => resolve({ dataUrl: e.target.result, size: file.size });
+      reader.onload = (e) => resolve({
+        dataUrl: e.target.result,
+        size: file.size,
+        type: file.type || 'application/pdf',
+        name: file.name
+      });
       reader.readAsDataURL(file);
       return;
     }

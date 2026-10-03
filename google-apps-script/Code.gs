@@ -58,6 +58,20 @@ function findHeaderRowInfo(sheet) {
     return { headerRowIndex: 6, headers: r6 };
   }
 
+  // "Insurance Renewal" sheet detection
+  if (sName.includes('renewal')) {
+    const lastCol = Math.max(sheet.getLastColumn(), 55);
+    const maxScanRows = Math.min(sheet.getLastRow(), 15);
+    for (let r = 1; r <= maxScanRows; r++) {
+      const rowVals = sheet.getRange(r, 1, 1, lastCol).getValues()[0];
+      const rowStr = rowVals.map(normalizeKey).join(' ');
+      if (rowStr.includes('renewalinsuranceid') || rowStr.includes('typeofcover') || (rowStr.includes('timestamp') && rowStr.includes('carname'))) {
+        return { headerRowIndex: r, headers: rowVals };
+      }
+    }
+    return { headerRowIndex: 4, headers: sheet.getRange(4, 1, 1, lastCol).getValues()[0] };
+  }
+
   const maxScanRows = Math.min(sheet.getLastRow(), 15);
   if (maxScanRows === 0) return { headerRowIndex: 1, headers: [] };
 
@@ -144,7 +158,10 @@ function doPost(e) {
 
     let sheet = ss.getSheetByName(sheetName);
     if (!sheet) {
-      if ((sheetName.toLowerCase().includes('repair') || sheetName.toLowerCase() === 'fms') && ss.getSheetByName('FMS')) {
+      if (sheetName.toLowerCase().includes('renewal')) {
+        const found = ss.getSheets().find(s => s.getName().trim().toLowerCase().includes('renewal'));
+        if (found) sheet = found;
+      } else if ((sheetName.toLowerCase().includes('repair') || sheetName.toLowerCase() === 'fms') && ss.getSheetByName('FMS')) {
         sheet = ss.getSheetByName('FMS');
       } else if (sheetName.toLowerCase().includes('accident')) {
         const found = ss.getSheets().find(s => s.getName().trim().toLowerCase().includes('accident'));
@@ -152,7 +169,7 @@ function doPost(e) {
       } else if (sheetName.toLowerCase().includes('insurance')) {
         const found = ss.getSheets().find(s => {
           const n = s.getName().trim().toLowerCase();
-          return n.includes('insurance of vehicle') || n.includes('insurance_of_vehicle') || n === 'insurance';
+          return (n.includes('insurance of vehicle') || n.includes('insurance_of_vehicle') || n === 'insurance') && !n.includes('renewal');
         });
         if (found) sheet = found;
       } else if (sheetName.toLowerCase().includes('emi')) {
@@ -189,15 +206,15 @@ function doPost(e) {
         } else if (sheetName.toLowerCase().includes('insurance')) {
           const defaultInsuranceHeaders = [
             'Timestamp', 'Date', 'Insurance ID', 'Vehicle ID', 'Car Name', 'Name Of Company',
-            'Date Of Insurance', 'Own Damage / Self Accident Details', 'OD Policy Start Date',
+            'Date Of Insurance', 'Own Damage / Self Accident', 'OD Policy Start Date',
             'OD Policy End Date', 'IDV Value (₹)', 'Own Damage / Basic Premium (₹)',
             'Policy Inclusive of NCB?', 'NCB Discount Amount (₹)', 'Cashless Facility Available?',
             'Add-On Premium (₹)', 'ZD (Zero Depreciation)', 'EP (Engine Protect)',
             'CM (Consumable Expenses)', 'PB (Loss of Personal Belonging)', 'Roadside Assistance (RSA)',
             'KP (Key Protect) ', 'Emergency Transport And Hotel', 'RTI (Return to Invoice)',
-            'Third Party (TP) Insurance Details', 'TP Policy Start Date', 'TP Policy End Date',
+            'Third Party (TP) Insurance', 'TP Policy Tenure', 'TP Policy Start Date', 'TP Policy End Date',
             '3rd Party Premium (₹)', 'TP Policy / Certificate No.', 'TPPD Coverage Limit (₹)',
-            'Personal Accident (PA) Cover Details', 'PA Cover Type', 'PA Sum Insured (₹)',
+            'Personal Accident (PA) Cover', 'PA Cover Type', 'PA Cover Tenure', 'PA Sum Insured (₹)',
             'PA Premium (₹)', 'PA Start Date', 'PA End Date', 'Nominee Name',
             'Nominee Relationship', 'Tax / GST (18%) Amount (₹)', 'Total Premium Amount (₹)',
             'Copy Of Insurance'
@@ -251,7 +268,7 @@ function doPost(e) {
     const { headerRowIndex, headers } = findHeaderRowInfo(sheet);
     const processedData = convertAllBase64ToDriveUrls(data) || {};
 
-    if (processedData && typeof processedData === 'object' && Object.keys(processedData).length > 0) {
+    if (processedData && typeof processedData === 'object' && !Array.isArray(processedData) && Object.keys(processedData).length > 0) {
       if (!processedData['Timestamp'] && !processedData['timestamp']) {
         processedData['Timestamp'] = formatCustomTimestamp();
       }
@@ -261,7 +278,8 @@ function doPost(e) {
     const isFMS = (sName === 'fms' || sName === 'car_repair');
     const isAccidentClaims = sName.includes('accident');
     const isEmi = sName.includes('emi');
-    const isInsurance = sName.includes('insurance');
+    const isInsuranceRenewal = sName.includes('renewal');
+    const isInsurance = sName.includes('insurance') && !isInsuranceRenewal;
 
     // ─── SPECIAL 1: SUBMIT VENDOR OFFER TO FMS ───
     // Col K: Actual 1 | Col M: Photo | Col N: Insurance | Col O: Types | Col P: Garage Name | Col Q: Expected Date
@@ -594,6 +612,106 @@ function doPost(e) {
         ];
         sheet.getRange(insertRowIndex, 1, 1, 12).setValues([emi12Values]);
         return createJsonResponse({ status: 'success', action: 'added', row: insertRowIndex, emiNo: emiNoVal, data: processedData });
+      } else if (isInsuranceRenewal) {
+        // 🔒 "Insurance Renewal" Sheet — 49 Column Layout with Type Of Cover and Policy End Date
+        // 🔒 Can accept a single row object OR an array of row objects (one row per renewed cover with same Renewal ID)
+        // 🔒 PROTECTED FORMULAS: Col 11 (Col K / Planned) and Col 13 (Col M / Delay) hold sheet formulas and are NEVER overwritten!
+        // 🔒 Col 12 (Col L / Actual) receives the submission timestamp from React.
+        // 🔒 Col 10 (Col J / Policy End Date) holds the previous policy cover's end date.
+        const rowsToAdd = Array.isArray(processedData) ? processedData : [processedData];
+        let baseReinsId = findValueByHeader(rowsToAdd[0], 'Renewal Insurance ID') || rowsToAdd[0]['renewalId'] || '';
+        if (!baseReinsId) {
+          baseReinsId = generateNextRenewalId(sheet, headerRowIndex);
+        }
+
+        const insertedRows = [];
+        for (let rIdx = 0; rIdx < rowsToAdd.length; rIdx++) {
+          const rowData = rowsToAdd[rIdx];
+          const currentRowIndex = insertRowIndex + rIdx;
+          const reinsId = rowData['Renewal Insurance ID'] || rowData['renewalId'] || baseReinsId;
+
+          // 1. Write Columns 1 to 10 (A to J): Timestamps, Renewal Insurance ID, Vehicle ID, Insurance ID, Car Name, Reg. No., Insurance Company, Insurance Agent / Broker, Type Of Cover, Policy End Date
+          const block10Values = [
+            findValueByHeader(rowData, 'Timestamps') || findValueByHeader(rowData, 'Timestamp') || formatCustomTimestamp(),
+            reinsId,
+            findValueByHeader(rowData, 'Vehicle ID') || '',
+            findValueByHeader(rowData, 'Insurance ID') || '',
+            findValueByHeader(rowData, 'Car Name') || '',
+            findValueByHeader(rowData, 'Reg. No.') || findValueByHeader(rowData, 'Registration No.') || '',
+            findValueByHeader(rowData, 'Insurance Company') || '',
+            findValueByHeader(rowData, 'Insurance Agent / Broker') || '',
+            findValueByHeader(rowData, 'Type Of Cover') || '',
+            findValueByHeader(rowData, 'Policy End Date') || ''
+          ];
+          sheet.getRange(currentRowIndex, 1, 1, 10).setValues([block10Values]);
+
+          // 🔒 2. Col 11 (Col K / Planned): 100% PROTECTED! (DO NOT TOUCH - Sheet formula preserved)
+
+          // 3. Col 12 (Col L / Actual): Write actual renewal timestamp from React
+          const actualVal = findValueByHeader(rowData, 'Actual') || formatCustomTimestamp();
+          sheet.getRange(currentRowIndex, 12).setValue(actualVal);
+
+          // 🔒 4. Col 13 (Col M / Delay): 100% PROTECTED! (DO NOT TOUCH - Sheet formula preserved)
+
+          // 5. Columns 14 onwards (Col N onwards): OD, TP, PA groups
+          for (let c = 14; c <= headers.length; c++) {
+            const h = headers[c - 1];
+            if (!h) continue;
+            const normH = normalizeKey(h);
+
+            // Never touch any planned or delay columns
+            if (normH.indexOf('planned') !== -1 || normH.indexOf('delay') !== -1) continue;
+
+            // Distinguish the 3 pairs of Tax and Total Premium columns based on column position (0-indexed: c - 1)
+            // OD Tax & Total: around col index 29 & 30 (Columns AD & AE / 30 & 31)
+            if (c >= 29 && c <= 32) {
+              if (normH.includes('tax') || normH.includes('gst')) {
+                const v = rowData['odTaxAmount'] !== undefined && rowData['odTaxAmount'] !== '' ? rowData['odTaxAmount'] : findValueByHeader(rowData, h);
+                if (v !== undefined && v !== null && v !== '') sheet.getRange(currentRowIndex, c).setValue(formatValueForSheet(v));
+                continue;
+              }
+              if (normH.includes('totalpremium')) {
+                const v = rowData['odTotalAmount'] !== undefined && rowData['odTotalAmount'] !== '' ? rowData['odTotalAmount'] : findValueByHeader(rowData, h);
+                if (v !== undefined && v !== null && v !== '') sheet.getRange(currentRowIndex, c).setValue(formatValueForSheet(v));
+                continue;
+              }
+            }
+            // TP Tax & Total: around col index 37 & 38 (Columns AL & AM / 38 & 39)
+            if (c >= 37 && c <= 40) {
+              if (normH.includes('tax') || normH.includes('gst')) {
+                const v = rowData['tpTaxAmount'] !== undefined && rowData['tpTaxAmount'] !== '' ? rowData['tpTaxAmount'] : findValueByHeader(rowData, h);
+                if (v !== undefined && v !== null && v !== '') sheet.getRange(currentRowIndex, c).setValue(formatValueForSheet(v));
+                continue;
+              }
+              if (normH.includes('totalpremium')) {
+                const v = rowData['tpTotalAmount'] !== undefined && rowData['tpTotalAmount'] !== '' ? rowData['tpTotalAmount'] : findValueByHeader(rowData, h);
+                if (v !== undefined && v !== null && v !== '') sheet.getRange(currentRowIndex, c).setValue(formatValueForSheet(v));
+                continue;
+              }
+            }
+            // PA Tax & Total: around col index 47 & 48 (Columns AV & AW / 48 & 49)
+            if (c >= 47 && c <= 50) {
+              if (normH.includes('tax') || normH.includes('gst')) {
+                const v = rowData['paTaxAmount'] !== undefined && rowData['paTaxAmount'] !== '' ? rowData['paTaxAmount'] : findValueByHeader(rowData, h);
+                if (v !== undefined && v !== null && v !== '') sheet.getRange(currentRowIndex, c).setValue(formatValueForSheet(v));
+                continue;
+              }
+              if (normH.includes('totalpremium')) {
+                const v = rowData['paTotalAmount'] !== undefined && rowData['paTotalAmount'] !== '' ? rowData['paTotalAmount'] : findValueByHeader(rowData, h);
+                if (v !== undefined && v !== null && v !== '') sheet.getRange(currentRowIndex, c).setValue(formatValueForSheet(v));
+                continue;
+              }
+            }
+
+            const val = findValueByHeader(rowData, h);
+            if (val !== undefined && val !== null && val !== '') {
+              sheet.getRange(currentRowIndex, c).setValue(formatValueForSheet(val));
+            }
+          }
+          insertedRows.push(currentRowIndex);
+        }
+
+        return createJsonResponse({ status: 'success', action: 'added', rows: insertedRows, renewalId: baseReinsId, count: rowsToAdd.length });
       } else if (isInsurance) {
         let insIdVal = findValueByHeader(processedData, 'Insurance ID') || processedData['insuranceId'] || '';
         if (!insIdVal) {
@@ -814,7 +932,15 @@ function saveBase64FileToDrive(base64String, filename, mimeType) {
       cleanBase64 = parts[1];
     }
 
-    const safeName = (filename || 'document_' + Date.now()).replace(/[^a-zA-Z0-9._-]/g, '_');
+    let safeName = (filename || 'document_' + Date.now()).replace(/[^a-zA-Z0-9._-]/g, '_');
+    if ((detectedMime === 'application/pdf' || detectedMime.includes('pdf')) && !safeName.toLowerCase().endsWith('.pdf')) {
+      safeName += '.pdf';
+    } else if (detectedMime.includes('png') && !safeName.toLowerCase().endsWith('.png')) {
+      safeName += '.png';
+    } else if ((detectedMime.includes('jpeg') || detectedMime.includes('jpg')) && !safeName.toLowerCase().endsWith('.jpg') && !safeName.toLowerCase().endsWith('.jpeg')) {
+      safeName += '.jpg';
+    }
+
     const decodedBytes = Utilities.base64Decode(cleanBase64);
     const blob = Utilities.newBlob(decodedBytes, detectedMime, safeName);
     const file = folder.createFile(blob);
@@ -836,18 +962,36 @@ function saveBase64FileToDrive(base64String, filename, mimeType) {
 
 function convertAllBase64ToDriveUrls(dataObj) {
   if (!dataObj || typeof dataObj !== 'object') return dataObj;
+  if (Array.isArray(dataObj)) {
+    return dataObj.map(convertAllBase64ToDriveUrls);
+  }
   const result = { ...dataObj };
 
   for (const [key, val] of Object.entries(result)) {
     if (typeof val === 'string' && val.startsWith('data:')) {
       const fieldNameClean = key.replace(/[^a-zA-Z0-9]/g, '_');
-      const upload = saveBase64FileToDrive(val, fieldNameClean + '_' + Date.now() + '.png', 'image/png');
+      let mime = 'image/png';
+      let ext = '.png';
+      if (val.includes('data:application/pdf') || key.toLowerCase().includes('pdf') || key.toLowerCase().includes('insurance')) {
+        mime = 'application/pdf';
+        ext = '.pdf';
+      } else if (val.includes('data:image/jpeg') || val.includes('data:image/jpg')) {
+        mime = 'image/jpeg';
+        ext = '.jpg';
+      }
+      const upload = saveBase64FileToDrive(val, fieldNameClean + '_' + Date.now() + ext, mime);
       if (upload.status === 'success') {
         result[key] = upload.url;
       }
     } else if (val && typeof val === 'object' && val.url) {
       if (typeof val.url === 'string' && val.url.startsWith('data:')) {
-        const upload = saveBase64FileToDrive(val.url, val.name || key + '_' + Date.now(), val.type);
+        let mime = val.type;
+        let name = val.name || key + '_' + Date.now();
+        if (val.url.includes('data:application/pdf') || (val.type && val.type.includes('pdf')) || key.toLowerCase().includes('insurance')) {
+          mime = mime || 'application/pdf';
+          if (!name.toLowerCase().endsWith('.pdf')) name += '.pdf';
+        }
+        const upload = saveBase64FileToDrive(val.url, name, mime);
         if (upload.status === 'success') {
           result[key] = upload.url;
         }
@@ -905,6 +1049,34 @@ function generateNextInsuranceId(sheet, headerRowIndex) {
   }
 }
 
+function generateNextRenewalId(sheet, headerRowIndex) {
+  try {
+    const allRows = sheet.getDataRange().getValues();
+    let maxNum = 0;
+    const startRow = Math.max(headerRowIndex, 1);
+    const headers = allRows[startRow - 1] || [];
+    let colIdx = 1; // Default Col B
+    for (let c = 0; c < headers.length; c++) {
+      const norm = normalizeKey(headers[c]);
+      if (norm === 'renewalinsuranceid' || norm === 'renewalid' || norm === 'reinsid') {
+        colIdx = c;
+        break;
+      }
+    }
+    for (let r = startRow; r < allRows.length; r++) {
+      const val = String(allRows[r][colIdx] || '').trim();
+      const match = val.replace(/[^0-9]/g, '');
+      const num = parseInt(match, 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    }
+    return 'REINS-' + String(maxNum + 1).padStart(4, '0');
+  } catch (err) {
+    return 'REINS-' + String(Date.now()).slice(-4);
+  }
+}
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function normalizeKey(str) {
   if (!str) return '';
@@ -924,6 +1096,9 @@ function findValueByHeader(dataObj, headerName) {
     // Synonyms for Insurance of Vehicle
     if ((target === 'insuranceofvehicle' || target === 'insurance' || target === 'hasinsurance') && 
         (normK === 'insuranceofvehicle' || normK === 'insurance' || normK === 'hasinsurance')) return v;
+    // Synonyms for Copy of Insurance
+    if ((target === 'copyofinsurance' || target === 'insurancecopy' || target === 'copyinsurance' || target === 'insurancepdf' || target === 'policycopy' || target === 'insurancepolicycopy') && 
+        (normK === 'copyofinsurance' || normK === 'insurancecopy' || normK === 'copyinsurance' || normK === 'insurancepdf' || normK === 'policycopy' || normK === 'insurancepolicycopy')) return v;
     // Synonyms for Car / Vehicle
     if ((target === 'vehicle' || target === 'carname' || target === 'vehiclename' || target === 'car') && 
         (normK === 'vehicle' || normK === 'carname' || normK === 'vehiclename' || normK === 'car')) return v;
@@ -948,6 +1123,32 @@ function findValueByHeader(dataObj, headerName) {
     // Synonyms for Driver Mobile
     if ((target === 'drivermobile' || target === 'drivermobileno' || target === 'driverphone') && 
         (normK === 'drivermobile' || normK === 'drivermobileno' || normK === 'driverphone')) return v;
+    // Synonyms for Insurance Cover Names & Tenures
+    if ((target === 'owndamageselfaccident' || target === 'owndamageselfaccidentdetails') && 
+        (normK === 'owndamageselfaccident' || normK === 'owndamageselfaccidentdetails')) return v;
+    if ((target === 'thirdpartytpinsurance' || target === 'thirdpartytpinsurancedetails' || target === 'thirdpartyinsurance') && 
+        (normK === 'thirdpartytpinsurance' || normK === 'thirdpartytpinsurancedetails' || normK === 'thirdpartyinsurance')) return v;
+    if ((target === 'personalaccidentpacover' || target === 'personalaccidentpacoverdetails' || target === 'personalaccidentcover') && 
+        (normK === 'personalaccidentpacover' || normK === 'personalaccidentpacoverdetails' || normK === 'personalaccidentcover')) return v;
+    if ((target === 'tppolicytenure' || target === 'tptenure' || target === 'tppolicytenuredetails') && 
+        (normK === 'tppolicytenure' || normK === 'tptenure' || normK === 'tppolicytenuredetails')) return v;
+    if ((target === 'pacovertenure' || target === 'patenure' || target === 'pacovertenuredetails') && 
+        (normK === 'pacovertenure' || normK === 'patenure' || normK === 'pacovertenuredetails')) return v;
+    // Synonyms for Renewal ID
+    if ((target === 'renewalid' || target === 'reinsid' || target === 'renewalinsid' || target === 'renewalinsuranceid') && 
+        (normK === 'renewalid' || normK === 'reinsid' || normK === 'renewalinsid' || normK === 'renewalinsuranceid')) return v;
+    // Synonyms for Type Of Cover
+    if ((target === 'typeofcover' || target === 'covertype' || target === 'typecover') && 
+        (normK === 'typeofcover' || normK === 'covertype' || normK === 'typecover')) return v;
+    // Synonyms for Policy End Date
+    if ((target === 'policyenddate' || target === 'enddateofpolicy' || target === 'coverenddate' || target === 'policyend') && 
+        (normK === 'policyenddate' || normK === 'enddateofpolicy' || normK === 'coverenddate' || normK === 'policyend')) return v;
+    // Synonyms for Renewed IDV Value
+    if ((target === 'renewedidvvalue' || target === 'renewedidv' || target === 'idvvalue') && 
+        (normK === 'renewedidvvalue' || normK === 'renewedidv' || normK === 'idvvalue')) return v;
+    // Synonyms for Claimed Insurance Last Year?
+    if ((target === 'claimedinsurancelastyear' || target === 'claimedlastyear' || target === 'claimedinsurance') && 
+        (normK === 'claimedinsurancelastyear' || normK === 'claimedlastyear' || normK === 'claimedinsurance')) return v;
     // Synonyms for Date of Accident
     if ((target === 'dateofaccident' || target === 'accidentdate') && 
         (normK === 'dateofaccident' || normK === 'accidentdate')) return v;

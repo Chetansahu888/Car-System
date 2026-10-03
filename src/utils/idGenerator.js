@@ -44,4 +44,13 @@ export const generateInsuranceId = (existingInsurance = []) => {
   return `INS-${pad(maxId + 1)}`;
 };
 
+export const generateRenewalId = (existingInsurance = []) => {
+  const maxId = (existingInsurance || []).reduce((max, ins) => {
+    const raw = ins?.renewalId || ins?.reinsId || '';
+    const num = parseInt(String(raw).replace(/[^0-9]/g, ''), 10);
+    return isNaN(num) ? max : Math.max(max, num);
+  }, 0);
+  return `REINS-${pad(maxId + 1)}`;
+};
+
 export const generateId = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
