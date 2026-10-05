@@ -302,7 +302,7 @@ const CarRepair = () => {
   };
 
   const repairStatuses = [...new Set(repairs.map(r => r.repairStatus))];
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.CAR_REPAIR);
   const hasOfferForRepair = (repairNo) => vendorOffers.some(v => v.repairNo === repairNo);
   const hasClaimForRepair = (repairNo) => claims.some(c => c.repairNo === repairNo);
@@ -457,6 +457,17 @@ const CarRepair = () => {
                                   </button>
                                 );
                               })()
+                            )}
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-xs"
+                                title="Edit Repair Record"
+                                style={{ color: '#0284c7', background: '#f0f9ff', padding: '6px 8px', borderRadius: 8 }}
+                                onClick={() => { setSelected(repair); setModal('edit'); }}
+                              >
+                                <Edit2 size={15} />
+                              </button>
                             )}
                             <button
                               type="button"

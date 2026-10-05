@@ -2,11 +2,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   CheckCircle, Search, X, XCircle, Eye, ShieldCheck, Clock,
-  Car, Wrench, AlertCircle, FileText, CheckCircle2, Shield, Lock
+  Car, Wrench, AlertCircle, FileText, CheckCircle2, Shield, Lock, Edit2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
-  getVendorOffers, getRepairs, approveVendorOffer, rejectVendorOffer,
+  getVendorOffers, getRepairs, approveVendorOffer, rejectVendorOffer, updateVendorOffer,
   syncAllFromSheets, onStoreUpdate
 } from '../store/dataStore';
 import { formatDate } from '../utils/dateUtils';
@@ -244,6 +244,72 @@ const ViewApprovalModal = ({ offer, onClose }) => {
   );
 };
 
+// ─── Edit Approval Modal ────────────────────────────────────────────────────────
+const EditApprovalModal = ({ offer, onClose, onSaved }) => {
+  const [status, setStatus] = useState(offer?.approvalStatus || 'Approved');
+  const [remarks, setRemarks] = useState(offer?.approvalRemarks || offer?.rejectionReason || '');
+  const [completionDate, setCompletionDate] = useState(offer?.expectedCompletionDate || '');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      if (status === 'Approved') {
+        await approveVendorOffer(offer.id || offer.repairNo, remarks);
+      } else if (status === 'Rejected') {
+        await rejectVendorOffer(offer.id || offer.repairNo, remarks);
+      }
+      if (completionDate) {
+        await updateVendorOffer(offer.id || offer.repairNo, { expectedCompletionDate: completionDate });
+      }
+      toast.success(`Approval for ${offer.repairNo} updated successfully!`);
+      onSaved();
+    } catch (err) {
+      toast.error(err.message || 'Failed to update approval');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} style={{ position: 'relative' }}>
+      <LoadingOverlay isVisible={submitting} message="Updating..." />
+      <div style={{ padding: 14, background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 16 }}>
+        <div style={{ fontWeight: 800, color: '#0f172a' }}>{offer.repairNo} — {offer.carName}</div>
+        <div style={{ fontSize: 12.5, color: '#64748b', marginTop: 4 }}>Vehicle ID: {offer.vehicleId || '—'} · Garage: {offer.garageName || '—'}</div>
+      </div>
+      <div className="form-group" style={{ marginBottom: 14 }}>
+        <label className="form-label">Approval Status <span className="required">*</span></label>
+        <select className="form-select" value={status} onChange={e => setStatus(e.target.value)}>
+          <option value="Approved">Approved</option>
+          <option value="Rejected">Rejected</option>
+          <option value="Pending">Pending</option>
+        </select>
+      </div>
+      <div className="form-group" style={{ marginBottom: 14 }}>
+        <label className="form-label">Expected Completion Date</label>
+        <input type="date" className="form-input" value={completionDate} onChange={e => setCompletionDate(e.target.value)} />
+      </div>
+      <div className="form-group" style={{ marginBottom: 18 }}>
+        <label className="form-label">Approval / Rejection Remarks</label>
+        <textarea
+          className="form-textarea"
+          rows={3}
+          value={remarks}
+          onChange={e => setRemarks(e.target.value)}
+          placeholder="Enter remarks or approval notes..."
+          style={{ resize: 'vertical' }}
+        />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid #f1f5f9', paddingTop: 14 }}>
+        <button type="button" className="btn btn-outline" onClick={onClose} disabled={submitting}>Cancel</button>
+        <button type="submit" className="btn btn-primary" disabled={submitting}>Save Changes</button>
+      </div>
+    </form>
+  );
+};
+
 // ─── MAIN APPROVALS PAGE ───────────────────────────────────────────────────────
 const Approvals = () => {
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'history'
@@ -255,6 +321,7 @@ const Approvals = () => {
 
   // Modals
   const [approvalModalOffer, setApprovalModalOffer] = useState(null);
+  const [editModalOffer, setEditModalOffer] = useState(null);
   const [viewModalOffer, setViewModalOffer] = useState(null);
 
   const load = useCallback(async () => {
@@ -307,7 +374,7 @@ const Approvals = () => {
   const totalPages = Math.ceil(currentList.length / ITEMS_PER_PAGE);
   const pagedList = currentList.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.APPROVALS);
 
   return (
@@ -588,14 +655,26 @@ const Approvals = () => {
                         />
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <button
-                          className="btn btn-ghost btn-xs"
-                          onClick={() => setViewModalOffer(offer)}
-                          title="View Details"
-                          style={{ color: '#059669', background: '#ecfdf5', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                        >
-                          <Eye size={15} /> View
-                        </button>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => setViewModalOffer(offer)}
+                            title="View Details"
+                            style={{ color: '#059669', background: '#ecfdf5', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          >
+                            <Eye size={15} /> View
+                          </button>
+                          {isAdmin && (
+                            <button
+                              className="btn btn-ghost btn-xs"
+                              onClick={() => setEditModalOffer(offer)}
+                              title="Edit Approval / Quotation"
+                              style={{ color: '#0284c7', background: '#f0f9ff', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <Edit2 size={14} /> Edit
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -644,6 +723,23 @@ const Approvals = () => {
           offer={viewModalOffer}
           onClose={() => setViewModalOffer(null)}
         />
+      </Modal>
+
+      {/* Edit Approval Modal (Admin Only) */}
+      <Modal
+        isOpen={!!editModalOffer}
+        onClose={() => setEditModalOffer(null)}
+        title={`Edit Approval — ${editModalOffer?.repairNo}`}
+        icon={ShieldCheck}
+        size="md"
+      >
+        {editModalOffer && (
+          <EditApprovalModal
+            offer={editModalOffer}
+            onClose={() => setEditModalOffer(null)}
+            onSaved={() => { setEditModalOffer(null); load(); }}
+          />
+        )}
       </Modal>
     </div>
   );

@@ -1,8 +1,8 @@
 // pages/Insurance.jsx
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, Plus, Search, Eye, X, AlertTriangle, CheckCircle, Clock, Car, CreditCard, ShieldCheck, RefreshCw, Calendar, Sparkles, Lock, FileText, Upload } from 'lucide-react';
+import { Shield, Plus, Search, Eye, X, AlertTriangle, CheckCircle, Clock, Car, CreditCard, ShieldCheck, RefreshCw, Calendar, Sparkles, Lock, FileText, Upload, Edit2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getCars, getInsurance, addInsurance, renewInsurance } from '../store/dataStore';
+import { getCars, getInsurance, addInsurance, updateInsurance, renewInsurance } from '../store/dataStore';
 import { uploadFileToDrive } from '../api/googleSheetsClient';
 import { calcInsuranceRenewal, calcEarliestCoverRenewal, formatDate, daysUntil, today, toInputDate, parseAnyDate, createTimestamp } from '../utils/dateUtils';
 import { generateId, generateInsuranceId, generateRenewalId } from '../utils/idGenerator';
@@ -63,12 +63,13 @@ const CheckField = ({ label, checked, onChange }) => (
   </label>
 );
 
-// ─── Add Insurance Form ───────────────────────────────────────────────────────
-const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
-  const [form, setForm] = useState({ ...EMPTY_FORM, date: '' });
+// ─── Add / Edit Insurance Form ───────────────────────────────────────────────
+const InsuranceForm = ({ cars, existingInsurance, editPolicy = null, onClose, onSaved }) => {
+  const isEdit = !!editPolicy;
+  const [form, setForm] = useState(isEdit ? { ...EMPTY_FORM, ...editPolicy } : { ...EMPTY_FORM, date: '' });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [selectedCar, setSelectedCar] = useState(null);
+  const [selectedCar, setSelectedCar] = useState(() => isEdit && editPolicy?.vehicleId ? cars.find(c => c.vehicleId === editPolicy.vehicleId) : null);
 
   const set = (field, value) => {
     setForm(f => {
@@ -137,8 +138,10 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
     e.preventDefault();
     const errs = validateForm(form, FORM_RULES);
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    const already = existingInsurance.find(i => i.vehicleId === form.vehicleId);
-    if (already) { toast.error('Insurance already exists for this vehicle. Please use "Renew Update" to renew.'); return; }
+    if (!isEdit) {
+      const already = existingInsurance.find(i => i.vehicleId === form.vehicleId);
+      if (already) { toast.error('Insurance already exists for this vehicle. Please use "Renew Update" to renew.'); return; }
+    }
     setSaving(true);
     try {
       let copyOfInsUrl = form.copyOfInsurance;
@@ -160,16 +163,27 @@ const InsuranceForm = ({ cars, existingInsurance, onClose, onSaved }) => {
       if (form.hasPaCover !== 'No' && form.paEndDate) activeEnds.push(form.paEndDate);
       const earliestRenewal = calcEarliestCoverRenewal(...activeEnds) || (renewal ? toInputDate(renewal) : '');
 
-      await addInsurance({
-        ...form,
-        copyOfInsurance: copyOfInsUrl,
-        id: generateId(),
-        validityDate: earliestRenewal,
-        renewalDate: earliestRenewal,
-        timestamp: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      });
-      toast.success('Insurance record added successfully');
+      if (isEdit) {
+        await updateInsurance(editPolicy.insuranceId || editPolicy.id || editPolicy.vehicleId, {
+          ...form,
+          copyOfInsurance: copyOfInsUrl,
+          validityDate: earliestRenewal || editPolicy.validityDate,
+          renewalDate: earliestRenewal || editPolicy.renewalDate,
+          updatedAt: new Date().toISOString()
+        });
+        toast.success(`Insurance for ${form.vehicleId || form.carName} updated successfully!`);
+      } else {
+        await addInsurance({
+          ...form,
+          copyOfInsurance: copyOfInsUrl,
+          id: generateId(),
+          validityDate: earliestRenewal,
+          renewalDate: earliestRenewal,
+          timestamp: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        });
+        toast.success('Insurance record added successfully');
+      }
       onSaved();
     } catch (err) {
       toast.error(err.message || 'Failed to save insurance');
@@ -1852,8 +1866,9 @@ const Insurance = () => {
   const renewalDueVehicles = rows.filter(r => r.ins && r.days !== null && r.days >= 0 && r.days <= 7);
   const expiredVehicles = rows.filter(r => r.ins && r.days !== null && r.days < 0);
 
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.INSURANCE);
+  const [editModalPolicy, setEditModalPolicy] = useState(null);
 
   return (
     <div>
@@ -2115,13 +2130,25 @@ const Insurance = () => {
                       </td>
 
                       <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                        {ins ? (
-                          <button className="btn btn-ghost btn-xs" onClick={() => setDetailModal(ins)}>
-                            <Eye size={15} /> Details
-                          </button>
-                        ) : (
-                          <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
-                        )}
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                          {ins ? (
+                            <button className="btn btn-ghost btn-xs" onClick={() => setDetailModal(ins)}>
+                              <Eye size={15} /> Details
+                            </button>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
+                          )}
+                          {isAdmin && ins && (
+                            <button
+                              className="btn btn-ghost btn-xs"
+                              title="Edit Insurance Policy"
+                              onClick={() => setEditModalPolicy(ins)}
+                              style={{ color: '#0284c7', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <Edit2 size={13} /> Edit
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -2138,6 +2165,14 @@ const Insurance = () => {
       <Modal isOpen={addModal} onClose={() => setAddModal(false)} title="Add New Insurance" icon={Shield} size="xl">
         <InsuranceForm cars={cars} existingInsurance={insurance}
           onClose={() => setAddModal(false)} onSaved={() => { setAddModal(false); load(); }} />
+      </Modal>
+
+      {/* Edit Insurance Modal (Admin Only) */}
+      <Modal isOpen={!!editModalPolicy} onClose={() => setEditModalPolicy(null)} title={`Edit Insurance Policy — ${editModalPolicy?.carName || editModalPolicy?.vehicleId || ''}`} icon={Shield} size="xl">
+        {editModalPolicy && (
+          <InsuranceForm cars={cars} existingInsurance={insurance} editPolicy={editModalPolicy}
+            onClose={() => setEditModalPolicy(null)} onSaved={() => { setEditModalPolicy(null); load(); }} />
+        )}
       </Modal>
 
       {/* ─── Update Renewal Modal ─── */}

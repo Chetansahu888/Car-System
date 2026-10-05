@@ -55,7 +55,7 @@ const FormField = ({ label, required: req, children }) => (
 );
 
 // ─── EMI DETAILS MODAL ─────────────────────────────────────────────────────────
-const EmiDetailsModal = ({ car, onClose, onRecordPayment, onEditEmi, canEdit }) => {
+const EmiDetailsModal = ({ car, onClose, onRecordPayment, onEditEmi, canEdit, isAdmin }) => {
   if (!car) return null;
 
   const emi = calcEmiDetails(car);
@@ -341,7 +341,7 @@ const EmiDetailsModal = ({ car, onClose, onRecordPayment, onEditEmi, canEdit }) 
 
       {/* Modal Actions */}
       <div className="modal-footer" style={{ padding: '16px 0 0', margin: 0, background: 'transparent', display: 'flex', justifyContent: 'space-between' }}>
-        {canEdit && (
+        {isAdmin && (
           <button
             type="button"
             className="btn btn-outline"
@@ -660,7 +660,7 @@ const RecordPaymentModal = ({ car, onClose, onSaved }) => {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 const VehicleOnEmi = () => {
   const navigate = useNavigate();
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.VEHICLE_EMI);
 
   const [cars, setCars] = useState([]);
@@ -1138,7 +1138,7 @@ const VehicleOnEmi = () => {
                               )}
 
                               {/* Edit EMI Button */}
-                              {canEdit && (
+                              {isAdmin && (
                                 <button
                                   type="button"
                                   className="btn btn-ghost btn-xs"
@@ -1213,6 +1213,7 @@ const VehicleOnEmi = () => {
               setEditModalCar(car);
             }}
             canEdit={canEdit}
+            isAdmin={isAdmin}
           />
         </Modal>
       )}

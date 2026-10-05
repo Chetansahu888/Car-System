@@ -2716,6 +2716,31 @@ export const rejectVendorOffer = async (id, reason) => {
   return all[idx];
 };
 
+export const updateVendorOffer = async (idOrRepairNo, updates) => {
+  const all = load(KEYS.VENDOR_OFFERS);
+  const idx = all.findIndex(o => o.id === idOrRepairNo || o.repairNo === idOrRepairNo);
+  if (idx === -1) throw new Error('Offer not found');
+  const now = createTimestamp();
+  all[idx] = { ...all[idx], ...updates, updatedAt: now };
+  save(KEYS.VENDOR_OFFERS, all);
+
+  await sendToSheet({
+    action: 'submit_vendor_offer',
+    sheetName: 'FMS',
+    keyValue: all[idx].repairNo,
+    data: {
+      'Car Repair No.': all[idx].repairNo,
+      'Actual 1': all[idx].actualDate || now,
+      'Photo Of Offer': all[idx].photoOfOffer,
+      'Insurance': all[idx].insurance,
+      'Types Of Repair': all[idx].typesOfRepair,
+      'Garage Name': all[idx].garageName || all[idx].garage || '',
+      'Expected Repair Completion Date': all[idx].expectedCompletionDate || '',
+    }
+  });
+  return all[idx];
+};
+
 // ─── DELIVERY PLANNING ────────────────────────────────────────────────────────
 export const getDeliveryPlanning = async () => {
   await delay();
@@ -2861,6 +2886,55 @@ export const submitDelivery = async (deliveryInput) => {
   return delRecord;
 };
 
+export const updateDelivery = async (repairNo, updates) => {
+  const deliveries = load(KEYS.DELIVERIES);
+  const idx = deliveries.findIndex(d => d.repairNo === repairNo || d.id === repairNo);
+  if (idx === -1) throw new Error('Delivery not found');
+  const now = createTimestamp();
+  deliveries[idx] = { ...deliveries[idx], ...updates, updatedAt: now };
+  save(KEYS.DELIVERIES, deliveries);
+
+  await sendToSheet({
+    action: 'submit_delivery',
+    sheetName: 'FMS',
+    keyValue: deliveries[idx].repairNo,
+    data: {
+      'Car Repair No.': deliveries[idx].repairNo,
+      'Actual 3': deliveries[idx].actualDate3 || deliveries[idx].submittedAt || now,
+      'Date Of Vechile Received Back': deliveries[idx].dateVehicleReceived || '',
+      'Date of Vehicle Received Back': deliveries[idx].dateVehicleReceived || '',
+      'K.M at The Time Of Repair': deliveries[idx].kmAtTimeOfRepair || '',
+      'Reapir Work Done': deliveries[idx].repairWorkDone || '',
+      'Repair Work Done': deliveries[idx].repairWorkDone || '',
+      'Parts Amount': deliveries[idx].partsAmount || '',
+      'Service Amount': deliveries[idx].serviceAmount || '',
+      'Insurance Claimed (If Any)': deliveries[idx].insuranceClaimed || 'No',
+      'Insurance Amount ( If Claimed )': deliveries[idx].insuranceAmount || '',
+      'Bill Amount': deliveries[idx].billAmount || '',
+      'Bill Image': typeof deliveries[idx].billImage === 'object' ? (deliveries[idx].billImage?.url || '') : (deliveries[idx].billImage || ''),
+    }
+  });
+
+  // Also sync billAmount to payments if present
+  const payments = load(KEYS.PAYMENTS);
+  const pIdx = payments.findIndex(p => p.repairNo === deliveries[idx].repairNo);
+  if (pIdx !== -1) {
+    payments[pIdx] = {
+      ...payments[pIdx],
+      billAmount: deliveries[idx].billAmount,
+      dateVehicleReceived: deliveries[idx].dateVehicleReceived,
+      kmAtTimeOfRepair: deliveries[idx].kmAtTimeOfRepair,
+      serviceAmount: deliveries[idx].serviceAmount,
+      billImage: deliveries[idx].billImage,
+      garageName: deliveries[idx].garageName || payments[pIdx].garageName,
+      updatedAt: now
+    };
+    save(KEYS.PAYMENTS, payments);
+  }
+
+  return deliveries[idx];
+};
+
 // ─── PAYMENTS ─────────────────────────────────────────────────────────────────
 export const getPayments = async () => {
   await delay();
@@ -2892,6 +2966,17 @@ export const updatePaymentStatus = async (repairNo, status) => {
       });
     }
   }
+  return payments[idx];
+};
+
+export const updatePayment = async (repairNo, updates) => {
+  const payments = load(KEYS.PAYMENTS);
+  const idx = payments.findIndex(p => p.repairNo === repairNo || p.id === repairNo);
+  if (idx === -1) throw new Error('Payment not found');
+  const now = createTimestamp();
+  payments[idx] = { ...payments[idx], ...updates, updatedAt: now };
+  save(KEYS.PAYMENTS, payments);
+  await sendToSheet({ action: 'update', sheetName: 'Payment', keyField: 'repairNo', keyValue: payments[idx].repairNo, data: payments[idx] });
   return payments[idx];
 };
 

@@ -1985,7 +1985,7 @@ const PurchaseCar = () => {
     }
   };
 
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.PURCHASE_CAR);
 
   const insuredIds = new Set(insurance.map(i => i.vehicleId));
@@ -2182,15 +2182,15 @@ const PurchaseCar = () => {
                           <button className="btn btn-ghost btn-xs" title="View Details" onClick={() => { setSelected(car); setModal('view'); }}>
                             <Eye size={15} />
                           </button>
+                          {isAdmin && (
+                            <button className="btn btn-ghost btn-xs" title="Edit Vehicle" onClick={() => { setSelected(car); setModal('edit'); }}>
+                              <Edit2 size={15} />
+                            </button>
+                          )}
                           {canEdit && (
-                            <>
-                              <button className="btn btn-ghost btn-xs" title="Edit" onClick={() => { setSelected(car); setModal('edit'); }}>
-                                <Edit2 size={15} />
-                              </button>
-                              <button className="btn btn-ghost btn-xs" title="Delete" style={{ color: '#ef4444' }} onClick={() => setDeleteDialog(car)}>
-                                <Trash2 size={15} />
-                              </button>
-                            </>
+                            <button className="btn btn-ghost btn-xs" title="Delete" style={{ color: '#ef4444' }} onClick={() => setDeleteDialog(car)}>
+                              <Trash2 size={15} />
+                            </button>
                           )}
                         </div>
                       </td>

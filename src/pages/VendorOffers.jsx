@@ -1,8 +1,8 @@
 // pages/VendorOffers.jsx
 import { useState, useEffect, useCallback } from 'react';
-import { Store, Search, Eye, CheckCircle, X, XCircle, Clock, CheckCircle2, AlertCircle, FileText, Wrench, Plus, HardDrive, Shield, Lock } from 'lucide-react';
+import { Store, Search, Eye, CheckCircle, X, XCircle, Clock, CheckCircle2, AlertCircle, FileText, Wrench, Plus, HardDrive, Shield, Lock, Edit2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getVendorOffers, getRepairs, addVendorOffer, updateRepair, approveVendorOffer, rejectVendorOffer, getMasterRepairTypes, syncAllFromSheets, onStoreUpdate } from '../store/dataStore';
+import { getVendorOffers, getRepairs, addVendorOffer, updateVendorOffer, updateRepair, approveVendorOffer, rejectVendorOffer, getMasterRepairTypes, syncAllFromSheets, onStoreUpdate } from '../store/dataStore';
 import { generateId } from '../utils/idGenerator';
 import { formatDate, today, createTimestamp } from '../utils/dateUtils';
 import { openDocument } from '../utils/fileUtils';
@@ -20,13 +20,14 @@ import LoadingOverlay from '../components/ui/LoadingOverlay';
 import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 
 // ─── Vendor Offer Creation Form Modal ─────────────────────────────────────────
-const CreateOfferModal = ({ repair, repairTypes, onClose, onSaved }) => {
+const CreateOfferModal = ({ repair, offer = null, repairTypes, onClose, onSaved }) => {
+  const isEdit = !!offer;
   const [form, setForm] = useState({
-    garageName: repair?.garage || '',
-    expectedCompletionDate: '',
-    photoOfOffer: null,
-    insurance: repair?.insuranceToBeClaimed || 'No',
-    typesOfRepair: [],
+    garageName: offer?.garageName || repair?.garage || '',
+    expectedCompletionDate: offer?.expectedCompletionDate || '',
+    photoOfOffer: offer?.photoOfOffer || null,
+    insurance: offer?.insurance || repair?.insuranceToBeClaimed || 'No',
+    typesOfRepair: offer?.typesOfRepair || [],
   });
   const [saving, setSaving] = useState(false);
 
@@ -65,26 +66,37 @@ const CreateOfferModal = ({ repair, repairTypes, onClose, onSaved }) => {
       }
 
       const nowTs = createTimestamp();
-      const offerRecord = {
-        id: generateId(),
-        repairNo: repair.repairNo,
-        vehicleId: repair.vehicleId,
-        carName: repair.carName,
-        garageName: form.garageName || repair.garage || '',
-        expectedCompletionDate: form.expectedCompletionDate,
-        plannedDate: repair.plannedDate || '',
-        actualDate: nowTs,
-        photoOfOffer: offerPhotoUrl,
-        insurance: form.insurance,
-        typesOfRepair: form.typesOfRepair,
-        approvalStatus: 'Pending',
-        timestamp: nowTs,
-      };
+      if (isEdit) {
+        await updateVendorOffer(offer.id || offer.repairNo, {
+          garageName: form.garageName,
+          expectedCompletionDate: form.expectedCompletionDate,
+          photoOfOffer: offerPhotoUrl,
+          insurance: form.insurance,
+          typesOfRepair: form.typesOfRepair,
+        });
+        toast.success(`Vendor Offer for ${offer.repairNo} updated successfully!`);
+      } else {
+        const offerRecord = {
+          id: generateId(),
+          repairNo: repair.repairNo,
+          vehicleId: repair.vehicleId,
+          carName: repair.carName,
+          garageName: form.garageName || repair.garage || '',
+          expectedCompletionDate: form.expectedCompletionDate,
+          plannedDate: repair.plannedDate || '',
+          actualDate: nowTs,
+          photoOfOffer: offerPhotoUrl,
+          insurance: form.insurance,
+          typesOfRepair: form.typesOfRepair,
+          approvalStatus: 'Pending',
+          timestamp: nowTs,
+        };
 
-      await addVendorOffer(offerRecord);
-      await updateRepair(repair.repairNo, { repairStatus: 'Offer Received', actualDate: nowTs });
+        await addVendorOffer(offerRecord);
+        await updateRepair(repair.repairNo, { repairStatus: 'Offer Received', actualDate: nowTs });
 
-      toast.success(`Vendor Offer for ${repair.repairNo} submitted successfully!`);
+        toast.success(`Vendor Offer for ${repair.repairNo} submitted successfully!`);
+      }
       onSaved();
     } catch (err) {
       toast.error(err.message || 'Failed to submit offer');
@@ -267,6 +279,7 @@ const VendorOffers = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
   const [offerModalRepair, setOfferModalRepair] = useState(null);
+  const [editModalOffer, setEditModalOffer] = useState(null);
   const [viewModal, setViewModal] = useState(null);
   const [approveDialog, setApproveDialog] = useState(null);
   const [rejectDialog, setRejectDialog] = useState(null);
@@ -350,7 +363,7 @@ const VendorOffers = () => {
     } finally { setActioning(false); }
   };
 
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.VENDOR_OFFERS);
 
   return (
@@ -601,14 +614,26 @@ const VendorOffers = () => {
                         />
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <button
-                          className="btn btn-ghost btn-xs"
-                          onClick={() => setViewModal(offer)}
-                          title="View Offer Details"
-                          style={{ color: '#059669', background: '#ecfdf5', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                        >
-                          <Eye size={15} /> View
-                        </button>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => setViewModal(offer)}
+                            title="View Offer Details"
+                            style={{ color: '#059669', background: '#ecfdf5', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          >
+                            <Eye size={15} /> View
+                          </button>
+                          {isAdmin && (
+                            <button
+                              className="btn btn-ghost btn-xs"
+                              onClick={() => setEditModalOffer(offer)}
+                              title="Edit Vendor Offer"
+                              style={{ color: '#0284c7', background: '#f0f9ff', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <Edit2 size={14} /> Edit
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -740,6 +765,25 @@ const VendorOffers = () => {
               />
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* Edit Offer Modal (Admin Only) */}
+      <Modal
+        isOpen={!!editModalOffer}
+        onClose={() => setEditModalOffer(null)}
+        title={`Edit Vendor Offer — ${editModalOffer?.repairNo}`}
+        icon={Store}
+        size="lg"
+      >
+        {editModalOffer && (
+          <CreateOfferModal
+            offer={editModalOffer}
+            repair={{ repairNo: editModalOffer.repairNo, carName: editModalOffer.carName, vehicleId: editModalOffer.vehicleId, garage: editModalOffer.garageName }}
+            repairTypes={masterTypes}
+            onClose={() => setEditModalOffer(null)}
+            onSaved={() => { setEditModalOffer(null); load(); }}
+          />
         )}
       </Modal>
     </div>

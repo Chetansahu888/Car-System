@@ -43,7 +43,7 @@ const VEHICLE_CLASSES = [
 ];
 
 const Fastag = () => {
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.FASTAG);
 
   const [cars, setCars] = useState([]);
@@ -514,16 +514,18 @@ const Fastag = () => {
                               >
                                 <Eye size={13} /> View Tag
                               </button>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenForm(car)}
+                                  className="btn btn-ghost btn-xs"
+                                  title="Edit Fastag Details"
+                                >
+                                  <Edit2 size={13} />
+                                </button>
+                              )}
                               {canEdit && (
                                 <>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenForm(car)}
-                                    className="btn btn-ghost btn-xs"
-                                    title="Edit Fastag Details"
-                                  >
-                                    <Edit2 size={13} />
-                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => { setBalanceModal(ft); setNewBalance(ft.balance || '0'); }}

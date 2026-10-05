@@ -2,12 +2,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   CreditCard, Search, Eye, X, ExternalLink, CheckCircle,
-  Clock, FileText, ArrowUpRight, Copy, Check, Lock
+  Clock, FileText, ArrowUpRight, Copy, Check, Lock, Edit2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   getDeliveries, getRepairs, getPayments,
-  updatePaymentStatus, syncAllFromSheets, onStoreUpdate
+  updatePaymentStatus, updatePayment, syncAllFromSheets, onStoreUpdate
 } from '../store/dataStore';
 import { formatDate } from '../utils/dateUtils';
 import { ITEMS_PER_PAGE } from '../constants';
@@ -44,6 +44,73 @@ const buildGoogleFormUrl = (item) => {
   }
 };
 
+const EditPaymentModal = ({ payment, onClose, onSaved }) => {
+  const [billAmount, setBillAmount] = useState(payment?.billAmount || '');
+  const [paymentStatus, setPaymentStatus] = useState(payment?.paymentStatus || 'Payment Completed');
+  const [paymentDate, setPaymentDate] = useState(payment?.paymentDate || (payment?.paidAt ? payment.paidAt.split('T')[0] : ''));
+  const [notes, setNotes] = useState(payment?.notes || '');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await updatePayment(payment.repairNo, {
+        billAmount,
+        paymentStatus,
+        paymentDate,
+        notes,
+        paidAt: paymentStatus === 'Payment Completed' ? (paymentDate || new Date().toISOString()) : payment?.paidAt
+      });
+      toast.success(`Payment for ${payment.repairNo} updated successfully!`);
+      onSaved();
+    } catch (err) {
+      toast.error(err.message || 'Failed to update payment');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} style={{ position: 'relative' }}>
+      <div style={{ padding: 14, background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 16 }}>
+        <div style={{ fontWeight: 800, color: '#0f172a' }}>{payment.repairNo} — {payment.vehicleName}</div>
+        <div style={{ fontSize: 12.5, color: '#64748b', marginTop: 4 }}>Garage: {payment.garageName || '—'} · Vehicle ID: {payment.vehicleId || '—'}</div>
+      </div>
+      <div className="form-group" style={{ marginBottom: 14 }}>
+        <label className="form-label">Bill Amount (₹) <span className="required">*</span></label>
+        <input type="number" className="form-input" value={billAmount} onChange={e => setBillAmount(e.target.value)} required />
+      </div>
+      <div className="form-group" style={{ marginBottom: 14 }}>
+        <label className="form-label">Payment Status <span className="required">*</span></label>
+        <select className="form-select" value={paymentStatus} onChange={e => setPaymentStatus(e.target.value)}>
+          <option value="Payment Completed">Payment Completed</option>
+          <option value="Payment Pending">Payment Pending</option>
+        </select>
+      </div>
+      <div className="form-group" style={{ marginBottom: 14 }}>
+        <label className="form-label">Payment Date</label>
+        <input type="date" className="form-input" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
+      </div>
+      <div className="form-group" style={{ marginBottom: 18 }}>
+        <label className="form-label">Notes / Remarks / UTR</label>
+        <textarea
+          className="form-textarea"
+          rows={3}
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder="Enter remarks or payment details..."
+          style={{ resize: 'vertical' }}
+        />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid #f1f5f9', paddingTop: 14 }}>
+        <button type="button" className="btn btn-outline" onClick={onClose} disabled={submitting}>Cancel</button>
+        <button type="submit" className="btn btn-primary" disabled={submitting}>Save Changes</button>
+      </div>
+    </form>
+  );
+};
+
 const Payment = () => {
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'history'
   const [deliveries, setDeliveries] = useState([]);
@@ -53,6 +120,7 @@ const Payment = () => {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [viewModalDelivery, setViewModalDelivery] = useState(null);
+  const [editModalPayment, setEditModalPayment] = useState(null);
 
   const load = useCallback(async (isInitial = false) => {
     if (isInitial) setInitialLoading(true);
@@ -137,7 +205,7 @@ const Payment = () => {
     window.open(formUrl, '_blank');
   };
 
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.PAYMENT);
 
   return (
@@ -352,13 +420,25 @@ const Payment = () => {
                     <td><Badge label={item.paymentStatus} variant="success" /></td>
                     <td style={{ fontSize: 12.5, color: '#64748b' }}>{formatDate(item.paidAt || item.timestamp)}</td>
                     <td style={{ textAlign: 'center' }}>
-                      <button
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => setViewModalDelivery(item)}
-                        style={{ color: '#059669', background: '#ecfdf5', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                      >
-                        <Eye size={15} /> View
-                      </button>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                        <button
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => setViewModalDelivery(item)}
+                          style={{ color: '#059669', background: '#ecfdf5', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <Eye size={15} /> View
+                        </button>
+                        {isAdmin && (
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => setEditModalPayment(item)}
+                            title="Edit Payment Details"
+                            style={{ color: '#0284c7', background: '#f0f9ff', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          >
+                            <Edit2 size={14} /> Edit
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -429,6 +509,23 @@ const Payment = () => {
               <button className="btn btn-outline" onClick={() => setViewModalDelivery(null)}>Close</button>
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* Edit Payment Modal (Admin Only) */}
+      <Modal
+        isOpen={!!editModalPayment}
+        onClose={() => setEditModalPayment(null)}
+        title={`Edit Payment Details — ${editModalPayment?.repairNo}`}
+        icon={CreditCard}
+        size="md"
+      >
+        {editModalPayment && (
+          <EditPaymentModal
+            payment={editModalPayment}
+            onClose={() => setEditModalPayment(null)}
+            onSaved={() => { setEditModalPayment(null); load(); }}
+          />
         )}
       </Modal>
     </div>

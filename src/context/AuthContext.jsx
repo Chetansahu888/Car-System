@@ -283,6 +283,7 @@ export const AuthProvider = ({ children }) => {
     <AuthContext.Provider
       value={{
         currentUser,
+        isAdmin: currentUser?.role === 'admin',
         users,
         loading,
         login,

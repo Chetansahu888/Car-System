@@ -2,12 +2,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Truck, Search, Eye, CheckCircle, X, ShieldCheck,
-  Calendar, Wrench, FileText, AlertCircle, Plus, UploadCloud, Lock
+  Calendar, Wrench, FileText, AlertCircle, Plus, UploadCloud, Lock, Edit2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   getRepairs, getVendorOffers, getDeliveries,
-  submitDelivery, syncAllFromSheets, onStoreUpdate
+  submitDelivery, updateDelivery, syncAllFromSheets, onStoreUpdate
 } from '../store/dataStore';
 import { formatDate, today } from '../utils/dateUtils';
 import { ITEMS_PER_PAGE } from '../constants';
@@ -23,19 +23,20 @@ import SpeedingCarLoader from '../components/ui/SpeedingCarLoader';
 import { uploadFileToDrive } from '../api/googleSheetsClient';
 
 // ─── Record Delivery Modal ───────────────────────────────────────────────────
-const RecordDeliveryModal = ({ repair, onClose, onSaved }) => {
+const RecordDeliveryModal = ({ repair, delivery = null, onClose, onSaved }) => {
+  const isEdit = !!delivery;
   const [form, setForm] = useState({
-    garageName: repair.garageName || repair.garage || '',
-    vehicleName: repair.carName || '',
-    dateVehicleReceived: today(),
-    kmAtTimeOfRepair: '',
-    repairWorkDone: Array.isArray(repair.typesOfRepair) ? repair.typesOfRepair.join(', ') : '',
-    partsAmount: '',
-    serviceAmount: '',
-    insuranceClaimed: repair.insurance === 'Yes' || repair.insuranceToBeClaimed === 'Yes' ? 'Yes' : 'No',
-    insuranceAmount: '',
-    billAmount: '',
-    billImage: null,
+    garageName: delivery?.garageName || repair?.garageName || repair?.garage || '',
+    vehicleName: delivery?.vehicleName || repair?.carName || '',
+    dateVehicleReceived: delivery?.dateVehicleReceived || today(),
+    kmAtTimeOfRepair: delivery?.kmAtTimeOfRepair || '',
+    repairWorkDone: delivery?.repairWorkDone || (Array.isArray(repair?.typesOfRepair) ? repair.typesOfRepair.join(', ') : ''),
+    partsAmount: delivery?.partsAmount || '',
+    serviceAmount: delivery?.serviceAmount || '',
+    insuranceClaimed: delivery?.insuranceClaimed || (repair?.insurance === 'Yes' || repair?.insuranceToBeClaimed === 'Yes' ? 'Yes' : 'No'),
+    insuranceAmount: delivery?.insuranceAmount || '',
+    billAmount: delivery?.billAmount || '',
+    billImage: delivery?.billImage || null,
   });
   const [submitting, setSubmitting] = useState(false);
   const set = (field, val) => setForm(f => ({ ...f, [field]: val }));
@@ -57,14 +58,21 @@ const RecordDeliveryModal = ({ repair, onClose, onSaved }) => {
         billDocUrl = billDocUrl.url;
       }
 
-      await submitDelivery({
-        repairNo: repair.repairNo,
-        vehicleId: repair.vehicleId,
-        ...form,
-        billImage: billDocUrl,
-      });
-
-      toast.success(`Delivery for ${repair.repairNo} recorded successfully!`);
+      if (isEdit) {
+        await updateDelivery(delivery.repairNo, {
+          ...form,
+          billImage: billDocUrl,
+        });
+        toast.success(`Delivery for ${delivery.repairNo} updated successfully!`);
+      } else {
+        await submitDelivery({
+          repairNo: repair.repairNo,
+          vehicleId: repair.vehicleId,
+          ...form,
+          billImage: billDocUrl,
+        });
+        toast.success(`Delivery for ${repair.repairNo} recorded successfully!`);
+      }
       onSaved();
     } catch (err) {
       toast.error(err.message || 'Failed to submit delivery');
@@ -323,6 +331,7 @@ const DeliveryOfCar = () => {
 
   // Modals
   const [deliveryModalRepair, setDeliveryModalRepair] = useState(null);
+  const [editModalDelivery, setEditModalDelivery] = useState(null);
   const [viewModalDelivery, setViewModalDelivery] = useState(null);
 
   const load = useCallback(async (isInitial = false) => {
@@ -389,7 +398,7 @@ const DeliveryOfCar = () => {
   const totalPages = Math.ceil(currentList.length / ITEMS_PER_PAGE) || 1;
   const pagedList = currentList.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.DELIVERY);
 
   return (
@@ -621,14 +630,26 @@ const DeliveryOfCar = () => {
                         )}
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <button
-                          className="btn btn-ghost btn-xs"
-                          onClick={() => setViewModalDelivery(del)}
-                          title="View Details"
-                          style={{ color: '#059669', background: '#ecfdf5', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                        >
-                          <Eye size={15} /> View
-                        </button>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => setViewModalDelivery(del)}
+                            title="View Details"
+                            style={{ color: '#059669', background: '#ecfdf5', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          >
+                            <Eye size={15} /> View
+                          </button>
+                          {isAdmin && (
+                            <button
+                              className="btn btn-ghost btn-xs"
+                              onClick={() => setEditModalDelivery(del)}
+                              title="Edit Delivery Details"
+                              style={{ color: '#0284c7', background: '#f0f9ff', padding: '5px 10px', borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <Edit2 size={14} /> Edit
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -677,6 +698,24 @@ const DeliveryOfCar = () => {
           delivery={viewModalDelivery}
           onClose={() => setViewModalDelivery(null)}
         />
+      </Modal>
+
+      {/* Edit Delivery Modal (Admin Only) */}
+      <Modal
+        isOpen={!!editModalDelivery}
+        onClose={() => setEditModalDelivery(null)}
+        title={`Edit Delivery Record — ${editModalDelivery?.repairNo}`}
+        icon={Truck}
+        size="lg"
+      >
+        {editModalDelivery && (
+          <RecordDeliveryModal
+            delivery={editModalDelivery}
+            repair={{ repairNo: editModalDelivery.repairNo, carName: editModalDelivery.vehicleName, vehicleId: editModalDelivery.vehicleId }}
+            onClose={() => setEditModalDelivery(null)}
+            onSaved={() => { setEditModalDelivery(null); load(false); }}
+          />
+        )}
       </Modal>
     </div>
   );

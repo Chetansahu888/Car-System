@@ -1209,7 +1209,7 @@ const AccidentClaims = ({ defaultStage }) => {
   const processStatuses = ['Claim Intimated', 'Surveyor Appointed', 'Survey In Progress', 'Survey Completed', 'Documents Submitted', 'Claim Under Process', 'Approved'];
   const settlementStatuses = ['Settled', 'Rejected'];
 
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.ACCIDENT_CLAIMS);
 
   /* ─────────────────────────────────────────────────────────────
@@ -1439,42 +1439,55 @@ const AccidentClaims = ({ defaultStage }) => {
               )}
 
               <td style={{ textAlign: 'center' }}>
-                {canEdit ? (
-                  <button
-                    className="btn btn-sm btn-primary"
-                    onClick={() => openStageActionModal(claim)}
-                    style={{
-                      fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px',
-                      background: (activeStage === 'process' || (activeStage === 'all' && currStage === 'process'))
-                        ? '#0284c7'
-                        : (activeStage === 'settlement' || (activeStage === 'all' && currStage === 'settlement'))
-                        ? '#059669'
-                        : '#ea580c',
-                      borderColor: 'transparent'
-                    }}
-                  >
-                    <FileCheck size={14} />
-                    {activeStage === 'incident'
-                      ? 'Submit Claim'
-                      : activeStage === 'process'
-                      ? 'Update Process'
-                      : activeStage === 'settlement'
-                      ? 'Settle Claim'
-                      : currStage === 'incident'
-                      ? '1. Submit Claim'
-                      : currStage === 'process'
-                      ? '2. Update Process'
-                      : '3. Settle Claim'}
-                  </button>
-                ) : (
-                  <button
-                    className="btn btn-sm btn-outline"
-                    onClick={() => { setSelected(claim); setModal('view'); }}
-                    style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 12px' }}
-                  >
-                    <Eye size={13} /> View
-                  </button>
-                )}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                  {canEdit ? (
+                    <button
+                      className="btn btn-sm btn-primary"
+                      onClick={() => openStageActionModal(claim)}
+                      style={{
+                        fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+                        background: (activeStage === 'process' || (activeStage === 'all' && currStage === 'process'))
+                          ? '#0284c7'
+                          : (activeStage === 'settlement' || (activeStage === 'all' && currStage === 'settlement'))
+                          ? '#059669'
+                          : '#ea580c',
+                        borderColor: 'transparent'
+                      }}
+                    >
+                      <FileCheck size={14} />
+                      {activeStage === 'incident'
+                        ? 'Submit Claim'
+                        : activeStage === 'process'
+                        ? 'Update Process'
+                        : activeStage === 'settlement'
+                        ? 'Settle Claim'
+                        : currStage === 'incident'
+                        ? '1. Submit Claim'
+                        : currStage === 'process'
+                        ? '2. Update Process'
+                        : '3. Settle Claim'}
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-sm btn-outline"
+                      onClick={() => { setSelected(claim); setModal('view'); }}
+                      style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 12px' }}
+                    >
+                      <Eye size={13} /> View
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      title="Edit Claim Details"
+                      onClick={() => { setSelected(claim); setModal('edit'); }}
+                      style={{ color: '#0284c7', background: '#f0f9ff', padding: '6px 8px', borderRadius: 6 }}
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           );
@@ -1638,13 +1651,11 @@ const AccidentClaims = ({ defaultStage }) => {
               <td style={{ textAlign: 'center' }}>
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                   <button className="btn btn-ghost btn-xs" title="View Details" onClick={() => { setSelected(claim); setModal('view'); }}><Eye size={15} /></button>
-                  {canEdit && (
-                    <>
-                      <button className="btn btn-ghost btn-xs" title="Edit Claim" onClick={() => { setSelected(claim); setModal('edit'); }}><Edit2 size={15} /></button>
-                      {(activeStage === 'settlement' || activeStage === 'all') && (
-                        <button className="btn btn-ghost btn-xs" title="Delete Claim" style={{ color: '#ef4444' }} onClick={() => setDeleteDialog(claim)}><Trash2 size={15} /></button>
-                      )}
-                    </>
+                  {isAdmin && (
+                    <button className="btn btn-ghost btn-xs" title="Edit Claim" onClick={() => { setSelected(claim); setModal('edit'); }}><Edit2 size={15} /></button>
+                  )}
+                  {canEdit && (activeStage === 'settlement' || activeStage === 'all') && (
+                    <button className="btn btn-ghost btn-xs" title="Delete Claim" style={{ color: '#ef4444' }} onClick={() => setDeleteDialog(claim)}><Trash2 size={15} /></button>
                   )}
                 </div>
               </td>

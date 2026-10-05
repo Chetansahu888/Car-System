@@ -35,7 +35,7 @@ const COMMON_CHALLAN_REASONS = [
 ];
 
 const Challans = () => {
-  const { canEditPage } = useAuth();
+  const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.CHALLANS);
 
   const [cars, setCars] = useState([]);
@@ -964,7 +964,7 @@ const Challans = () => {
                               <CheckCircle2 size={13} /> Mark Paid
                             </button>
                           )}
-                          {canEdit && (
+                          {isAdmin && (
                             <button
                               type="button"
                               onClick={() => handleEditChallan(ch, viewCarHistory)}
