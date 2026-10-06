@@ -22,6 +22,7 @@ import DeliveryPlanning from './pages/DeliveryPlanning';
 import DeliveryOfCar from './pages/DeliveryOfCar';
 import Payment from './pages/Payment';
 import UserManagement from './pages/UserManagement';
+import CarReport from './pages/CarReport';
 
 import { initLiveSyncService } from './store/dataStore';
 
@@ -228,6 +229,26 @@ function AppRoutes() {
           <ProtectedRoute pageKey={PAGE_KEYS.PAYMENT}>
             <Layout>
               <Payment />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/report"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.REPORT}>
+            <Layout>
+              <CarReport />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/car-report"
+        element={
+          <ProtectedRoute pageKey={PAGE_KEYS.REPORT}>
+            <Layout>
+              <CarReport />
             </Layout>
           </ProtectedRoute>
         }

@@ -18,6 +18,7 @@ export const PAGE_KEYS = {
   APPROVALS: 'approvals',
   DELIVERY: 'delivery',
   PAYMENT: 'payment',
+  REPORT: 'report',
 };
 
 export const PAGE_CONFIG = [
@@ -33,6 +34,7 @@ export const PAGE_CONFIG = [
   { key: PAGE_KEYS.APPROVALS, label: 'Approvals', path: '/approvals', defaultLevel: 'full' },
   { key: PAGE_KEYS.DELIVERY, label: 'Delivery Of Car', path: '/delivery', defaultLevel: 'full' },
   { key: PAGE_KEYS.PAYMENT, label: 'Payment', path: '/payment', defaultLevel: 'full' },
+  { key: PAGE_KEYS.REPORT, label: 'Car Report', path: '/report', defaultLevel: 'full' },
 ];
 
 export const ACCESS_LEVELS = {

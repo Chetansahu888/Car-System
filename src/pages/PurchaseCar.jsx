@@ -1,6 +1,7 @@
 // pages/PurchaseCar.jsx
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Car, Plus, Search, Edit2, Trash2, Eye, X, Filter, CreditCard, User, UserCheck, UserPlus, Shield, ShieldCheck, FileText, CheckCircle, Lock, AlertTriangle, Clock, Calendar, Bell, ChevronDown } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Car, Plus, Search, Edit2, Trash2, Eye, X, Filter, CreditCard, User, UserCheck, UserPlus, Shield, ShieldCheck, FileText, CheckCircle, Lock, AlertTriangle, Clock, Calendar, Bell, ChevronDown, FileSpreadsheet } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getCars, addCar, updateCar, deleteCar, getInsurance, renewInsurance, syncEmiToSheet, getMasterFirmNames, getMasterEmployees, onStoreUpdate, checkHasEmi } from '../store/dataStore';
 import { generateVehicleId, generateEmiNo, generateInsuranceId } from '../utils/idGenerator';
@@ -1985,6 +1986,7 @@ const PurchaseCar = () => {
     }
   };
 
+  const navigate = useNavigate();
   const { canEditPage, isAdmin } = useAuth();
   const canEdit = canEditPage(PAGE_KEYS.PURCHASE_CAR);
 
@@ -1994,16 +1996,26 @@ const PurchaseCar = () => {
     <div>
       {!canEdit && <ReadOnlyNotice moduleName="Purchase Car Records" />}
 
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-title">Purchase Car</h1>
           <p className="page-subtitle">{cars.length} vehicle{cars.length !== 1 ? 's' : ''} in fleet master database</p>
         </div>
-        {canEdit && (
-          <button className="btn btn-primary" onClick={() => { setSelected(null); setModal('add'); }}>
-            <Plus size={16} strokeWidth={2.5} /> Add New Car
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => navigate('/report')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#059669', borderColor: '#a7f3d0' }}
+          >
+            <FileSpreadsheet size={16} /> Vehicle 360° Report
           </button>
-        )}
+          {canEdit && (
+            <button className="btn btn-primary" onClick={() => { setSelected(null); setModal('add'); }}>
+              <Plus size={16} strokeWidth={2.5} /> Add New Car
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="data-table-container">
@@ -2181,6 +2193,14 @@ const PurchaseCar = () => {
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                           <button className="btn btn-ghost btn-xs" title="View Details" onClick={() => { setSelected(car); setModal('view'); }}>
                             <Eye size={15} />
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            title="Vehicle 360° Report"
+                            style={{ color: '#059669' }}
+                            onClick={() => navigate(`/report?car=${car.vehicleId}`)}
+                          >
+                            <FileSpreadsheet size={15} />
                           </button>
                           {isAdmin && (
                             <button className="btn btn-ghost btn-xs" title="Edit Vehicle" onClick={() => { setSelected(car); setModal('edit'); }}>

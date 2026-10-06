@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Car, Shield, Wrench, AlertTriangle,
   Store, CheckCircle, Truck, CreditCard, FileWarning,
   ChevronLeft, ChevronRight, X, Users, Lock, Eye, Clock,
-  ChevronDown
+  ChevronDown, FileSpreadsheet
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import {
@@ -61,6 +61,12 @@ const NAV_GROUPS = [
     section: 'Finance',
     items: [
       { to: '/payment', label: 'Payment', icon: CreditCard, badgeKey: 'payments', pageKey: PAGE_KEYS.PAYMENT },
+    ],
+  },
+  {
+    section: 'Reports',
+    items: [
+      { to: '/report', label: 'Car Report', icon: FileSpreadsheet, pageKey: PAGE_KEYS.REPORT },
     ],
   },
 ];

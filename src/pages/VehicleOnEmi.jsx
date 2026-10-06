@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Clock, CreditCard, AlertTriangle, Eye, Edit2, CheckCircle,
   Search, RefreshCw, Car, ChevronRight, Calendar, Bell, Plus,
-  CheckCircle2, TrendingUp, Filter, X, Shield, ArrowUpRight
+  CheckCircle2, TrendingUp, Filter, X, Shield, ArrowUpRight, FileSpreadsheet
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getCars, updateCar, onStoreUpdate, checkHasEmi, syncAllFromSheets } from '../store/dataStore';
@@ -56,6 +56,7 @@ const FormField = ({ label, required: req, children }) => (
 
 // ─── EMI DETAILS MODAL ─────────────────────────────────────────────────────────
 const EmiDetailsModal = ({ car, onClose, onRecordPayment, onEditEmi, canEdit, isAdmin }) => {
+  const navigate = useNavigate();
   if (!car) return null;
 
   const emi = calcEmiDetails(car);
@@ -340,17 +341,27 @@ const EmiDetailsModal = ({ car, onClose, onRecordPayment, onEditEmi, canEdit, is
       </div>
 
       {/* Modal Actions */}
-      <div className="modal-footer" style={{ padding: '16px 0 0', margin: 0, background: 'transparent', display: 'flex', justifyContent: 'space-between' }}>
-        {isAdmin && (
+      <div className="modal-footer" style={{ padding: '16px 0 0', margin: 0, background: 'transparent', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
           <button
             type="button"
             className="btn btn-outline"
-            onClick={() => { onClose(); onEditEmi(car); }}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={() => { onClose(); navigate(`/report?car=${car.vehicleId}`); }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#059669', borderColor: '#a7f3d0' }}
           >
-            <Edit2 size={14} /> Edit EMI Details
+            <FileSpreadsheet size={14} /> Full 360° Report
           </button>
-        )}
+          {isAdmin && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => { onClose(); onEditEmi(car); }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <Edit2 size={14} /> Edit EMI Details
+            </button>
+          )}
+        </div>
         <button type="button" className="btn btn-primary" onClick={onClose}>
           Close
         </button>
@@ -797,7 +808,14 @@ const VehicleOnEmi = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button
+            className="btn btn-outline"
+            onClick={() => navigate('/report')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#059669', borderColor: '#a7f3d0' }}
+          >
+            <FileSpreadsheet size={14} /> Vehicle 360° Report
+          </button>
           <button
             className="btn btn-outline"
             onClick={() => {

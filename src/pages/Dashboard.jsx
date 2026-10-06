@@ -5,7 +5,7 @@ import {
   Car, Shield, AlertTriangle, Wrench, Store, CheckCircle,
   Truck, Package, CreditCard, TrendingUp, Clock, XCircle,
   AlertCircle, Activity, ChevronRight, RefreshCw, Calendar,
-  Bell, ArrowRight, Sparkles
+  Bell, ArrowRight, Sparkles, FileSpreadsheet
 } from 'lucide-react';
 import {
   getCars, getInsurance, getRepairs, getClaims,
@@ -165,8 +165,8 @@ const Dashboard = () => {
   return (
     <div>
       {/* Page header */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
             width: 44, height: 44, borderRadius: 12,
             background: 'linear-gradient(135deg, #059669, #047857)',
@@ -180,6 +180,20 @@ const Dashboard = () => {
             <p className="page-subtitle">Real-time enterprise overview of company vehicles, delivery reminders & workflows</p>
           </div>
         </div>
+
+        <button
+          onClick={() => navigate('/report')}
+          className="btn btn-primary"
+          style={{
+            background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+            display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px',
+            borderRadius: 10, fontWeight: 700, fontSize: 13.5,
+            boxShadow: '0 4px 14px rgba(5, 150, 105, 0.25)'
+          }}
+        >
+          <FileSpreadsheet size={17} />
+          <span>Vehicle 360° Report</span>
+        </button>
       </div>
 
       {/* ─── 2-DAY DELIVERY REMINDER BANNER ─── */}

@@ -33,6 +33,7 @@ export const PAGE_STEPS = [
   { key: 'approvals', label: 'Approvals' },
   { key: 'delivery', label: 'Delivery Of Car' },
   { key: 'payment', label: 'Payment' },
+  { key: 'report', label: 'Car Report' },
 ];
 
 const notifyStoreUpdate = () => {
@@ -1874,6 +1875,11 @@ export const deleteInsurance = async (id) => {
       data: { [keyField]: keyValue }
     });
   }
+};
+
+export const getInsuranceRenewals = async () => {
+  await delay();
+  return load(KEYS.RENEWALS);
 };
 
 // ─── REPAIRS CRUD (SYNC TO "FMS") ─────────────────────────────────────────────
