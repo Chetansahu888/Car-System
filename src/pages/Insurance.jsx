@@ -435,6 +435,7 @@ const InsuranceForm = ({ cars, existingInsurance, editPolicy = null, onClose, on
                   }));
                 }}
               >
+                <option value="5">5 Years</option>
                 <option value="3">3 Years</option>
                 <option value="1">1 Year</option>
               </select>
@@ -532,6 +533,7 @@ const InsuranceForm = ({ cars, existingInsurance, editPolicy = null, onClose, on
               >
                 <option value="1">1 Year</option>
                 <option value="3">3 Years</option>
+                <option value="5">5 Years</option>
               </select>
             </div>
             <div className="form-group">
@@ -1248,6 +1250,7 @@ const RenewalUpdateModal = ({ car, existingIns, allInsurance = [], onClose, onSa
               >
                 <option value="1">1 Year</option>
                 <option value="3">3 Years</option>
+                <option value="5">5 Years</option>
               </select>
             </div>
             <div className="form-group">
@@ -1346,6 +1349,7 @@ const RenewalUpdateModal = ({ car, existingIns, allInsurance = [], onClose, onSa
               >
                 <option value="1">1 Year</option>
                 <option value="3">3 Years</option>
+                <option value="5">5 Years</option>
               </select>
             </div>
             <div className="form-group">

@@ -1348,6 +1348,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                         }));
                       }}
                     >
+                      <option value="5">5 Years</option>
                       <option value="3">3 Years</option>
                       <option value="1">1 Year</option>
                     </select>
@@ -1440,6 +1441,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                     >
                       <option value="1">1 Year</option>
                       <option value="3">3 Years</option>
+                      <option value="5">5 Years</option>
                     </select>
                   </FormField>
                   <FormField label="PA Sum Insured (₹)">
