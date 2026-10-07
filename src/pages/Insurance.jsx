@@ -614,6 +614,8 @@ const InsuranceForm = ({ cars, existingInsurance, editPolicy = null, onClose, on
         const tpAmt = form.hasThirdParty !== 'No' ? (Number(form.thirdPartyPremium) || 0) : 0;
         const paAmt = form.hasPaCover !== 'No' ? (Number(form.paPremium) || 0) : 0;
         const netPremium = odNet + tpAmt + paAmt;
+        const currentTax = (form.taxAmount !== undefined && form.taxAmount !== '') ? Number(form.taxAmount) : Math.round(netPremium * 0.18);
+        const currentTotal = (form.totalPremiumAmount || form.totalPremiumToBePaid) ? Number(form.totalPremiumAmount || form.totalPremiumToBePaid) : (netPremium + currentTax);
 
         return (
           <>
@@ -633,14 +635,14 @@ const InsuranceForm = ({ cars, existingInsurance, editPolicy = null, onClose, on
               }}>
                 <span>Net Premium: <strong>₹{netPremium.toLocaleString('en-IN')}</strong></span>
                 <span>•</span>
-                <span>Auto 18% GST: <strong>₹{(Math.round(netPremium * 0.18)).toLocaleString('en-IN')}</strong></span>
+                <span>Total GST: <strong>₹{currentTax.toLocaleString('en-IN')}</strong></span>
                 <span>•</span>
-                <span style={{ fontWeight: 800 }}>Total Premium: ₹{(netPremium + Math.round(netPremium * 0.18)).toLocaleString('en-IN')}</span>
+                <span style={{ fontWeight: 800 }}>Total Premium: ₹{currentTotal.toLocaleString('en-IN')}</span>
               </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 8 }}>
               <div className="form-group">
-                <label className="form-label">Tax / GST Amount (18%) (₹)</label>
+                <label className="form-label">Total GST Amount (₹)</label>
                 <input
                   type="number"
                   className="form-input"
@@ -650,7 +652,7 @@ const InsuranceForm = ({ cars, existingInsurance, editPolicy = null, onClose, on
                 />
                 {netPremium > 0 && (
                   <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 4 }}>
-                    Auto: 18% GST on Net ₹{netPremium.toLocaleString('en-IN')}
+                    Net Premium: ₹{netPremium.toLocaleString('en-IN')}
                   </div>
                 )}
               </div>
@@ -670,7 +672,7 @@ const InsuranceForm = ({ cars, existingInsurance, editPolicy = null, onClose, on
                 />
                 {netPremium > 0 && (
                   <div style={{ fontSize: 11.5, color: '#059669', fontWeight: 600, marginTop: 4 }}>
-                    ✓ Auto: Net Premium + 18% GST
+                    ✓ Net Premium + Total GST
                   </div>
                 )}
               </div>
@@ -1390,34 +1392,38 @@ const RenewalUpdateModal = ({ car, existingIns, allInsurance = [], onClose, onSa
         <div className="form-section-icon"><CreditCard size={18} strokeWidth={2.2} /></div>
         <div className="form-section-title">Total Premium & Taxes Breakdown</div>
       </div>
-      {renewNet > 0 ? (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '10px 14px',
-          background: '#ecfdf5',
-          borderRadius: 8,
-          border: '1px solid #a7f3d0',
-          marginBottom: 16,
-          fontSize: 12.5,
-          color: '#065f46',
-          flexWrap: 'wrap'
-        }}>
-          <span>Net Premium: <strong>₹{renewNet.toLocaleString('en-IN')}</strong></span>
-          <span>•</span>
-          <span>Auto 18% GST: <strong>₹{(Math.round(renewNet * 0.18)).toLocaleString('en-IN')}</strong></span>
-          <span>•</span>
-          <span style={{ fontWeight: 800 }}>Total: ₹{(renewNet + Math.round(renewNet * 0.18)).toLocaleString('en-IN')}</span>
-        </div>
-      ) : (
+      {renewNet > 0 ? (() => {
+        const currentTax = (form.taxAmount !== undefined && form.taxAmount !== '') ? Number(form.taxAmount) : Math.round(renewNet * 0.18);
+        const currentTotal = form.totalPremiumAmount ? Number(form.totalPremiumAmount) : (renewNet + currentTax);
+        return (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '10px 14px',
+            background: '#ecfdf5',
+            borderRadius: 8,
+            border: '1px solid #a7f3d0',
+            marginBottom: 16,
+            fontSize: 12.5,
+            color: '#065f46',
+            flexWrap: 'wrap'
+          }}>
+            <span>Net Premium: <strong>₹{renewNet.toLocaleString('en-IN')}</strong></span>
+            <span>•</span>
+            <span>Total GST: <strong>₹{currentTax.toLocaleString('en-IN')}</strong></span>
+            <span>•</span>
+            <span style={{ fontWeight: 800 }}>Total: ₹{currentTotal.toLocaleString('en-IN')}</span>
+          </div>
+        );
+      })() : (
         <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 16, fontSize: 12, color: '#64748b' }}>
           ℹ No covers currently selected for renewal. Premium will calculate as you renew covers.
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
         <div className="form-group">
-          <label className="form-label">Tax / GST (18%) (₹)</label>
+          <label className="form-label">Total GST Amount (₹)</label>
           <input type="number" className="form-input" value={form.taxAmount} onChange={e => set('taxAmount', e.target.value)} placeholder="0" />
         </div>
         <div className="form-group">

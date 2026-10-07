@@ -1516,7 +1516,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
 
               return (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-                  <FormField label="Tax / GST (18%) Amount (₹)">
+                  <FormField label="Total GST Amount (₹)">
                     <input
                       type="number"
                       className="form-input"
@@ -1526,7 +1526,7 @@ const CarForm = ({ car, cars, onClose, onSaved }) => {
                     />
                     {netTotal > 0 && (
                       <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 4 }}>
-                        Auto: 18% GST on Net ₹{netTotal.toLocaleString('en-IN')}
+                        Net Premium: ₹{netTotal.toLocaleString('en-IN')}
                       </div>
                     )}
                   </FormField>

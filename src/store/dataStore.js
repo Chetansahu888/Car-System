@@ -417,6 +417,7 @@ export const mapInsuranceToSheet = (ins, existingList = []) => {
     "PA End Date": ins.paEndDate || '',
     "Nominee Name": ins.paNomineeName || ins.nomineeName || '',
     "Nominee Relationship": ins.paNomineeRelation || ins.nomineeRelationship || '',
+    "Total GST Amount (₹)": ins.taxAmount || '',
     "Tax / GST (18%) Amount (₹)": ins.taxAmount || '',
     "Total Premium Amount (₹)": ins.totalPremiumAmount || ins.totalPremiumToBePaid || '',
     "Copy Of Insurance": ins.copyOfInsurance?.url || (typeof ins.copyOfInsurance === 'string' ? ins.copyOfInsurance : '') || '',
@@ -497,6 +498,7 @@ export const mapInsuranceRenewalToSheet = (rec) => {
     "paTotalAmount": rec.paTotalAmount !== undefined ? rec.paTotalAmount : '',
 
     // Fallbacks
+    "Total GST Amount (₹)": rec.taxAmount || '',
     "Tax / GST (18%) (₹)": rec.taxAmount || '',
     "Total Premium Amount (₹)": rec.totalPremiumAmount || rec.totalPremiumToBePaid || '',
   };
@@ -719,7 +721,7 @@ export const mapSheetRowToInsurance = (row, index) => {
     paEndDate: get('PA End Date', 'paEndDate'),
     paNomineeName: get('Nominee Name', 'PA Nominee Name', 'paNomineeName'),
     paNomineeRelation: get('Nominee Relationship', 'PA Nominee Relation', 'paNomineeRelation'),
-    taxAmount: get('Tax / GST (18%) Amount (₹)', 'Tax Amount', 'taxAmount'),
+    taxAmount: get('Total GST Amount (₹)', 'Tax / GST (18%) Amount (₹)', 'Tax / GST (18%) (₹)', 'Total GST', 'Tax Amount', 'taxAmount'),
     totalPremiumAmount: get('Total Premium Amount (₹)', 'Total Premium Amount', 'Total Premium To Be Paid', 'totalPremiumAmount'),
     totalPremiumToBePaid: get('Total Premium Amount (₹)', 'Total Premium To Be Paid', 'totalPremiumToBePaid'),
     copyOfInsurance: get('Copy Of Insurance', 'Copy of Insurance', 'copyOfInsurance'),
