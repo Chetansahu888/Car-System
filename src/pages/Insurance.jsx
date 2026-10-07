@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Shield, Plus, Search, Eye, X, AlertTriangle, CheckCircle, Clock, Car, CreditCard, ShieldCheck, RefreshCw, Calendar, Sparkles, Lock, FileText, Upload, Edit2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getCars, getInsurance, addInsurance, updateInsurance, renewInsurance } from '../store/dataStore';
+import { getCars, getInsurance, addInsurance, updateInsurance, renewInsurance, syncAllFromSheets, onStoreUpdate } from '../store/dataStore';
 import { uploadFileToDrive } from '../api/googleSheetsClient';
 import { calcInsuranceRenewal, calcEarliestCoverRenewal, formatDate, daysUntil, today, toInputDate, parseAnyDate, createTimestamp } from '../utils/dateUtils';
 import { generateId, generateInsuranceId, generateRenewalId } from '../utils/idGenerator';
@@ -1815,20 +1815,60 @@ const Insurance = () => {
   const [detailModal, setDetailModal] = useState(null);
   const [renewalModalCar, setRenewalModalCar] = useState(null); // car object for renewal
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     const [c, i] = await Promise.all([getCars(), getInsurance()]);
     setCars(c); setInsurance(i);
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await syncAllFromSheets(false);
+      await load(true);
+      toast.success('Google Sheet data synced successfully!');
+    } catch (err) {
+      toast.error('Sync failed: ' + (err.message || 'Network error'));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    syncAllFromSheets(true).catch(() => {});
+    const unsub = onStoreUpdate(() => {
+      load(true);
+    });
+    return unsub;
+  }, [load]);
 
   const insMap = {};
-  insurance.forEach(i => { insMap[i.vehicleId] = i; });
+  insurance.forEach(i => {
+    if (i.vehicleId) insMap[i.vehicleId] = i;
+    if (i.registrationNo) insMap[i.registrationNo.toLowerCase().replace(/[^a-z0-9]/g, '')] = i;
+    if (i.carName) insMap[i.carName.toLowerCase().trim()] = i;
+  });
+
+  const findCarIns = (car) => {
+    if (!car) return null;
+    if (car.vehicleId && insMap[car.vehicleId]) return insMap[car.vehicleId];
+    if (car.registrationNo) {
+      const reg = car.registrationNo.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (insMap[reg]) return insMap[reg];
+    }
+    if (car.carName) {
+      const name = car.carName.toLowerCase().trim();
+      if (insMap[name]) return insMap[name];
+    }
+    return null;
+  };
 
   const getDaysLeft = (car) => {
-    const ins = insMap[car.vehicleId];
+    const ins = findCarIns(car);
     if (!ins) return null;
     const odEnd = ins.odEndDate || ins.renewalDate || ins.validityDate;
     const tpEnd = ins.tpEndDate;
@@ -1841,7 +1881,7 @@ const Insurance = () => {
   };
 
   const getStatus = (car) => {
-    const ins = insMap[car.vehicleId];
+    const ins = findCarIns(car);
     if (!ins) return 'Not Available';
     const days = getDaysLeft(car);
     if (days === null) return 'Available';
@@ -1852,7 +1892,7 @@ const Insurance = () => {
   };
 
   const rows = cars.map(car => {
-    const ins = insMap[car.vehicleId];
+    const ins = findCarIns(car);
     const days = getDaysLeft(car);
     const status = getStatus(car);
     const isRenewalDue = !ins || (days !== null && days <= 7);
@@ -1889,11 +1929,22 @@ const Insurance = () => {
           <h1 className="page-title">Insurance Management</h1>
           <p className="page-subtitle">{cars.length} fleet vehicles · 7-day renewal reminder tracking enabled</p>
         </div>
-        {canEdit && (
-          <button className="btn btn-primary" onClick={() => setAddModal(true)}>
-            <Plus size={16} strokeWidth={2.5} /> Add Insurance
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Sync latest records from Google Sheet"
+          >
+            <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+            {refreshing ? 'Syncing...' : 'Sync with Sheet'}
           </button>
-        )}
+          {canEdit && (
+            <button className="btn btn-primary" onClick={() => setAddModal(true)}>
+              <Plus size={16} strokeWidth={2.5} /> Add Insurance
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ─── 7-Day Renewal Reminder Banner ─── */}
